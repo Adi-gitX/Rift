@@ -1,9 +1,33 @@
-// raft-dispatcher Worker — routes pr-N--repo.preview.<base> to the WfP namespace.
-// Filled in T8.1. Day 1: stub config so the workspace resolves.
+// raft-dispatcher Worker — path-based router for free-tier preview URLs.
+//
+// Free-tier substitution: PRD §3 used a wildcard subdomain
+// (`pr-N--repo.preview.<base>`) routed via Workers for Platforms. On the
+// free tier we have neither WfP nor wildcard custom domains, so previews
+// are served at:
+//
+//     https://raft-dispatcher.<your>.workers.dev/<scope>/<original-path>
+//
+// where <scope> is the per-PR key (e.g. `pr-1--acmeapi`). The dispatcher
+// looks up `route:<scope>` in the shared raft-routes KV (written by the
+// ProvisionRunner step `route-and-comment`) and forwards to the user
+// worker's `<scriptName>.<workers-subdomain>/<original-path>` with an
+// internal shared-secret header that the user worker should verify.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "raft-dispatcher",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-29",
-  "observability": { "enabled": true }
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  "vars": {
+    "CF_WORKERS_SUBDOMAIN": "adityakammati3.workers.dev",
+    "RAFT_BASE_DOMAIN": "workers.dev"
+  },
+  // INTERNAL_DISPATCH_SECRET is set via `wrangler secret put` (matches the
+  // secret the control plane injects into uploaded user worker bindings).
+
+  "kv_namespaces": [
+    { "binding": "ROUTES", "id": "51028e006702422181200bf121d5af1e" }
+  ]
 }
