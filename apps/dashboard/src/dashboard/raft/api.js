@@ -39,6 +39,7 @@ export const api = {
   prEnvironment:      (id) => get(`/api/pr-environments/${encodeURIComponent(id)}`),
   prEnvironmentLogs:  (id) => get(`/api/pr-environments/${encodeURIComponent(id)}/logs`),
   runnerState:        (id) => get(`/api/pr-environments/${encodeURIComponent(id)}/runner`),
+  teardownRunnerState:(id) => get(`/api/pr-environments/${encodeURIComponent(id)}/teardown-runner`),
   audit:              () => get("/api/audit"),
   rotateUploadToken:  (repoId) => post(`/api/v1/repos/${encodeURIComponent(repoId)}/rotate-upload-token`),
   teardown:           (prEnvId) => post(`/api/v1/prs/${encodeURIComponent(prEnvId)}/teardown`),
