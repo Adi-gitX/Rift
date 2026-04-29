@@ -224,6 +224,12 @@ export const uploadScript = async (ctx: StepContext): Promise<UploadScriptResult
     const r = await cfWorkers.uploadScript(client, params);
     if (r.ok) {
       await setResourceHandles(ctx.env.DB, ctx.prEnvId, { workerScriptName: ctx.scriptName });
+      // *.workers.dev exposure is disabled by default for REST-uploaded
+      // scripts. Without this the dispatcher's forwarded fetch hits CF's
+      // empty-subdomain placeholder. Failure here is logged but non-fatal:
+      // the script is uploaded, the dashboard still works via direct DO RPC.
+      const sub = await cfWorkers.enableSubdomain(client, ctx.scriptName);
+      if (!sub.ok) ctx.log.warn('enable_subdomain_failed', { error: sub.error.message });
       return r.value.etag === undefined
         ? { scriptId: r.value.id }
         : { scriptId: r.value.id, etag: r.value.etag };
