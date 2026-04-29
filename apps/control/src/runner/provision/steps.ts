@@ -34,6 +34,8 @@ export interface StepContext {
   fetcher: typeof fetch;
   /** Pre-stored step results keyed by step name (idempotent replay). */
   prior: Record<string, unknown>;
+  /** Test-only knob for the upload-script propagation backoff. */
+  propagationDelayMs?: number;
 }
 
 export interface LoadConfigResult {
@@ -44,7 +46,10 @@ export interface LoadConfigResult {
 export interface ProvisionResourcesResult {
   d1: { binding: string; database_id: string; database_name: string };
   kv: { binding: string; id: string; title: string };
-  queue: { binding: string; queue_name: string };
+  // queue_name is what user-Worker bindings reference; queue_id (UUID) is
+  // what the CF API DELETE endpoint requires. Track both — bundle rewriter
+  // uses the name; teardown uses the id.
+  queue: { binding: string; queue_name: string; queue_id: string };
   r2Prefix: string;
 }
 
@@ -95,7 +100,7 @@ export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> =>
 const cfClientFromCtx = (ctx: StepContext): CFClient =>
   new CFClient({
     accountId: ctx.env.CF_OWN_ACCOUNT_ID,
-    token: ctx.env.CF_DEMO_API_TOKEN,
+    token: ctx.env.CF_API_TOKEN,
     fetcher: ctx.fetcher,
     logger: ctx.log,
     baseDelayMs: 50,
@@ -116,13 +121,20 @@ export const provisionResources = async (ctx: StepContext): Promise<ProvisionRes
   const result: ProvisionResourcesResult = {
     d1: { binding: 'DB', database_id: d1.value.uuid, database_name: d1.value.name },
     kv: { binding: 'KV', id: kv.value.id, title: kv.value.title },
-    queue: { binding: 'QUEUE', queue_name: queue.value.queue_name },
+    queue: {
+      binding: 'QUEUE',
+      queue_name: queue.value.queue_name,
+      queue_id: queue.value.queue_id,
+    },
     r2Prefix: `tenants/${ctx.params.installationId}/${ctx.scope}/`,
   };
   await setResourceHandles(ctx.env.DB, ctx.prEnvId, {
     d1DatabaseId: result.d1.database_id,
     kvNamespaceId: result.kv.id,
-    queueId: result.queue.queue_name,
+    // Store the UUID (required by `DELETE /queues/{id}` at teardown), NOT
+    // the human-readable queue_name. The user-Worker binding still uses
+    // queue_name via the bundle rewriter — see ProvisionResourcesResult.
+    queueId: result.queue.queue_id,
     r2Prefix: result.r2Prefix,
     doNamespaceSeed: ctx.scope,
   });
@@ -173,6 +185,17 @@ export const rewriteBundleStep = async (ctx: StepContext): Promise<RewriteBundle
   };
 };
 
+// CF error codes that mean "the binding's resource hasn't propagated yet"
+// — fixable by retrying after a short delay (typically 2-5s for D1/KV/Queue).
+const PROPAGATION_ERROR_CODES = ['10181', '10041', '100100'] as const;
+const UPLOAD_PROPAGATION_RETRIES = 5;
+const UPLOAD_PROPAGATION_DELAY_MS = 2000;
+
+const isPropagationLag = (e: CodedError): boolean => {
+  const body = (e.details as { body?: string } | undefined)?.body ?? '';
+  return PROPAGATION_ERROR_CODES.some((code) => body.includes(`"code":${code}`));
+};
+
 export const uploadScript = async (ctx: StepContext): Promise<UploadScriptResult> => {
   const { config, provisioned } = requirePrior(ctx);
   if (!cfWorkers.validateScriptName(ctx.scriptName)) {
@@ -180,32 +203,49 @@ export const uploadScript = async (ctx: StepContext): Promise<UploadScriptResult
   }
   const rewritten = buildRewrite(ctx, config, provisioned);
   const client = cfClientFromCtx(ctx);
-  const r = await cfWorkers.uploadScript(client, {
+  const params: Parameters<typeof cfWorkers.uploadScript>[1] = {
     scriptName: ctx.scriptName,
     mainModule: config.wrangler.main_module,
     modules: rewritten.modules,
     compatibilityDate: config.wrangler.compatibility_date,
     compatibilityFlags: config.wrangler.compatibility_flags ?? [],
     bindings: rewritten.bindings as cfWorkers.WorkerBinding[],
-    tailConsumers: [{ service: 'raft-tail' }],
+    // Free-tier substitution: tail_consumers requires Workers Paid (CF error
+    // code 100150). v1 omits Tail Workers; live logs in the dashboard work
+    // via the LogTail DO over hibernatable WS. Re-enable in v2 when on a
+    // paid plan or when raft-tail is bound as a service rather than a tail.
     tags: [
       `installation:${ctx.params.installationId}`,
       `repo:${ctx.params.repoFullName}`,
       `pr:${ctx.params.prNumber}`,
     ],
-  });
-  if (!r.ok) throw r.error;
-  await setResourceHandles(ctx.env.DB, ctx.prEnvId, { workerScriptName: ctx.scriptName });
-  return r.value.etag === undefined
-    ? { scriptId: r.value.id }
-    : { scriptId: r.value.id, etag: r.value.etag };
+  };
+  for (let attempt = 0; attempt < UPLOAD_PROPAGATION_RETRIES; attempt++) {
+    const r = await cfWorkers.uploadScript(client, params);
+    if (r.ok) {
+      await setResourceHandles(ctx.env.DB, ctx.prEnvId, { workerScriptName: ctx.scriptName });
+      return r.value.etag === undefined
+        ? { scriptId: r.value.id }
+        : { scriptId: r.value.id, etag: r.value.etag };
+    }
+    if (!isPropagationLag(r.error) || attempt === UPLOAD_PROPAGATION_RETRIES - 1) {
+      throw r.error;
+    }
+    const delay = ctx.propagationDelayMs ?? UPLOAD_PROPAGATION_DELAY_MS;
+    ctx.log.warn('upload_script_propagation_retry', { attempt: attempt + 1, delay_ms: delay });
+    await new Promise((res) => setTimeout(res, delay));
+  }
+  throw new NonRetryableError('E_CF_API', 'upload_script: propagation_exhausted');
 };
 
 export const routeAndComment = async (ctx: StepContext): Promise<RouteAndCommentResult> => {
-  const routeKey = `host:${ctx.previewHostname}`;
+  // Path-based route used by raft-dispatcher (free-tier: no wildcard subdomain).
+  const routeKey = `route:${ctx.scope}`;
   await ctx.env.ROUTES.put(routeKey, ctx.scriptName, {
     metadata: { installationId: ctx.params.installationId, prNumber: ctx.params.prNumber },
   });
+  // Reverse index used by the tail-events queue consumer to map script → PR env.
+  await ctx.env.ROUTES.put(`script:${ctx.scriptName}:pr`, ctx.prEnvId);
   await setResourceHandles(ctx.env.DB, ctx.prEnvId, { previewHostname: ctx.previewHostname });
   // TODO(raft:slice-G) — post sticky PR comment via GitHub install token.
   return {
