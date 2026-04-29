@@ -12,8 +12,7 @@ import * as cfD1 from '../../lib/cloudflare/d1.ts';
 import * as cfKv from '../../lib/cloudflare/kv.ts';
 import * as cfQueues from '../../lib/cloudflare/queues.ts';
 import * as cfWorkers from '../../lib/cloudflare/workers.ts';
-import { purgePrefix } from '../../lib/cloudflare/r2.ts';
-import { Logger } from '../../lib/logger.ts';
+import { type Logger } from '../../lib/logger.ts';
 import { getPrEnvironment } from '../../lib/db/prEnvironments.ts';
 import type { PrEnvironment } from '../../lib/db/types.ts';
 import type { Env } from '../../env.ts';
@@ -28,7 +27,7 @@ export interface TeardownStepContext {
 const cfClient = (ctx: TeardownStepContext): CFClient =>
   new CFClient({
     accountId: ctx.env.CF_OWN_ACCOUNT_ID,
-    token: ctx.env.CF_DEMO_API_TOKEN,
+    token: ctx.env.CF_API_TOKEN,
     fetcher: globalThis.fetch.bind(globalThis),
     logger: ctx.log,
     baseDelayMs: 50,
@@ -101,16 +100,20 @@ export const deleteQueueStep = async (
   return { deleted: true, queueId: id };
 };
 
-export const purgeR2Prefix = async (
+export const purgeBundleKv = async (
   ctx: TeardownStepContext,
 ): Promise<{ deleted: number; prefix: string | null }> => {
+  // Free-tier substitution: bundles live in BUNDLES_KV (KV) under a per-PR
+  // prefix, not in R2. KV doesn't expose list-by-prefix on the binding API
+  // (only on the REST API), so we delete the canonical bundle key and accept
+  // that older heads will TTL out of KV via the put().expirationTtl on upload.
+  // TODO(raft:slice-G) — list+delete via REST KV API for truly stale keys.
   const env = await loadEnv(ctx);
-  const prefix = env?.resources.r2Prefix ?? null;
-  if (!prefix) return { deleted: 0, prefix: null };
-  // BUNDLES holds the per-PR R2 keys; the bucket is shared, prefix is per-PR.
-  const r = await purgePrefix(ctx.env.BUNDLES, prefix);
-  if (!r.ok) throw r.error;
-  return { deleted: r.value.deleted, prefix };
+  const scriptName = env?.resources.workerScriptName ?? null;
+  if (!scriptName) return { deleted: 0, prefix: null };
+  const key = `bundle:${scriptName}:current`;
+  await ctx.env.BUNDLES_KV.delete(key);
+  return { deleted: 1, prefix: scriptName };
 };
 
 export const evictDoShard = async (
@@ -128,9 +131,11 @@ export const evictDoShard = async (
 
 export const clearRoute = async (ctx: TeardownStepContext): Promise<{ cleared: boolean }> => {
   const env = await loadEnv(ctx);
-  if (!env?.previewHostname) return { cleared: false };
-  await ctx.env.ROUTES.delete(`host:${env.previewHostname}`);
-  return { cleared: true };
+  const scope = env?.resources.doNamespaceSeed ?? null;
+  const scriptName = env?.resources.workerScriptName ?? null;
+  if (scope) await ctx.env.ROUTES.delete(`route:${scope}`);
+  if (scriptName) await ctx.env.ROUTES.delete(`script:${scriptName}:pr`);
+  return { cleared: scope !== null };
 };
 
 export const markTornDown = async (_ctx: TeardownStepContext): Promise<{ noted: true }> => {
@@ -143,7 +148,7 @@ export const TEARDOWN_STEP_FNS = {
   'delete-d1': deleteD1,
   'delete-kv': deleteKv,
   'delete-queue': deleteQueueStep,
-  'purge-r2-prefix': purgeR2Prefix,
+  'purge-bundle-kv': purgeBundleKv,
   'evict-do-shard': evictDoShard,
   'clear-route': clearRoute,
   'mark-torn-down': markTornDown,
