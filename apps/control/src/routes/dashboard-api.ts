@@ -22,6 +22,7 @@ import {
 import { listAuditForInstallation, listAuditForTarget } from '../lib/db/auditLog.ts';
 import type { LogTail, LogEvent } from '../do/log-tail.ts';
 import type { ProvisionRunner } from '../do/provision-runner.ts';
+import type { TeardownRunner } from '../do/teardown-runner.ts';
 
 export const dashboardApi = new Hono<ControlAppEnv>();
 
@@ -167,6 +168,30 @@ dashboardApi.get('/api/stats', async (c) => {
      ORDER BY day ASC`,
   ).bind(sevenDaysAgo).all<{ day: string; provisions: number; provisions_failed: number; teardowns: number }>();
 
+  // Pad to a contiguous 7-day window so the sparkline never collapses to a
+  // single tick. Backend builds the window so every consumer agrees on UTC
+  // bucketing.
+  const dailyByDay = new Map<string, { provisions: number; provisions_failed: number; teardowns: number }>();
+  for (const row of daily.results ?? []) {
+    dailyByDay.set(row.day, {
+      provisions: row.provisions,
+      provisions_failed: row.provisions_failed,
+      teardowns: row.teardowns,
+    });
+  }
+  const paddedDaily: Array<{ day: string; provisions: number; provisions_failed: number; teardowns: number }> = [];
+  for (let i = 6; i >= 0; i--) {
+    const ts = Math.floor(Date.now() / 1000) - i * 86400;
+    const day = new Date(ts * 1000).toISOString().slice(0, 10);
+    const existing = dailyByDay.get(day);
+    paddedDaily.push({
+      day,
+      provisions: existing?.provisions ?? 0,
+      provisions_failed: existing?.provisions_failed ?? 0,
+      teardowns: existing?.teardowns ?? 0,
+    });
+  }
+
   return c.json(
     apiOk(
       {
@@ -197,7 +222,7 @@ dashboardApi.get('/api/stats', async (c) => {
           kv_namespaces:  { used: counts?.kv_used     ?? 0, max: 1000 },
           queues:         { used: counts?.queue_used  ?? 0, max: 10 },
         },
-        daily: daily.results ?? [],
+        daily: paddedDaily,
       },
       c.var.requestId,
     ),
@@ -244,6 +269,20 @@ dashboardApi.get('/api/pr-environments/:id/runner', async (c) => {
     return c.json(apiOk({ snapshot, stepResults }, c.var.requestId));
   } catch (e) {
     return c.json(apiErr('E_INTERNAL', `runner_state failed: ${String(e)}`, c.var.requestId), 500);
+  }
+});
+
+dashboardApi.get('/api/pr-environments/:id/teardown-runner', async (c) => {
+  const id = decodeURIComponent(c.req.param('id'));
+  const stub = c.env.TEARDOWN_RUNNER.get(c.env.TEARDOWN_RUNNER.idFromName(id)) as DurableObjectStub<TeardownRunner>;
+  try {
+    const [snapshot, stepResults] = await Promise.all([
+      stub.getStateSnapshot(),
+      stub.getStepResults(),
+    ]);
+    return c.json(apiOk({ snapshot, stepResults }, c.var.requestId));
+  } catch (e) {
+    return c.json(apiErr('E_INTERNAL', `teardown_runner_state failed: ${String(e)}`, c.var.requestId), 500);
   }
 });
 

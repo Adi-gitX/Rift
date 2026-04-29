@@ -84,12 +84,15 @@ describe('uploadScript — propagation retry', () => {
       .fn()
       .mockResolvedValueOnce(cfBindingMissing('10181', "D1 binding 'DB' references database 'X' which was not found"))
       .mockResolvedValueOnce(cfBindingMissing('10181', 'still propagating'))
-      .mockResolvedValueOnce(cfOk({ id: 'raft-up-test-pr-1', etag: 'e1' }));
+      .mockResolvedValueOnce(cfOk({ id: 'raft-up-test-pr-1', etag: 'e1' }))
+      // After successful upload, uploadScript calls enableSubdomain.
+      .mockResolvedValueOnce(cfOk({ enabled: true }));
     ctx.fetcher = fetcher as unknown as typeof fetch;
 
     const r = await uploadScript(ctx);
     expect(r.scriptId).toBe('raft-up-test-pr-1');
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    // 3 upload attempts + 1 subdomain enable.
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
   it('retries on CF code 10041 (KV namespace not found) then succeeds', async () => {
@@ -97,12 +100,13 @@ describe('uploadScript — propagation retry', () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(cfBindingMissing('10041', "KV namespace 'X' not found"))
-      .mockResolvedValueOnce(cfOk({ id: 'raft-up-test-pr-1', etag: 'e1' }));
+      .mockResolvedValueOnce(cfOk({ id: 'raft-up-test-pr-1', etag: 'e1' }))
+      .mockResolvedValueOnce(cfOk({ enabled: true }));
     ctx.fetcher = fetcher as unknown as typeof fetch;
 
     const r = await uploadScript(ctx);
     expect(r.scriptId).toBe('raft-up-test-pr-1');
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
   it('does NOT retry on non-propagation 400 — fails immediately', async () => {

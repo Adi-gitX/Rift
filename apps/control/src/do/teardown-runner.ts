@@ -37,6 +37,15 @@ export class TeardownRunner extends DurableObject<Env> {
     return (await this.ctx.storage.get<TeardownRunnerState>(STATE_KEY)) ?? null;
   }
 
+  async getStepResults(): Promise<Record<string, unknown>> {
+    const out: Record<string, unknown> = {};
+    for (const name of TEARDOWN_STEP_ORDER) {
+      const cached = await this.ctx.storage.get<unknown>(stepKey(name));
+      if (cached !== undefined) out[name] = cached;
+    }
+    return out;
+  }
+
   override async alarm(): Promise<void> {
     const state = await this.ctx.storage.get<TeardownRunnerState>(STATE_KEY);
     if (!state || state.status !== 'running') return;
