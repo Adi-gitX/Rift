@@ -9,13 +9,18 @@
  */
 import { Hono } from 'hono';
 import { apiOk } from '@raft/shared-types';
-import type { Env, RaftQueueMessage } from './env.ts';
+import type { Env, RaftQueueMessage, TailEvent } from './env.ts';
 import type { ControlAppEnv } from './app-env.ts';
 import { requestId } from './middleware/request-id.ts';
 import { logger as loggerMiddleware } from './middleware/logger.ts';
 import { onError, onNotFound } from './middleware/error.ts';
 import { githubRoutes } from './routes/github.ts';
+import { authRoutes } from './routes/auth.ts';
+import { apiRoutes } from './routes/api.ts';
+import { dashboardRoutes } from './routes/dashboard.ts';
+import { dashboardApi } from './routes/dashboard-api.ts';
 import { handleQueueBatch } from './queue/consumer.ts';
+import { handleTailQueueBatch } from './queue/tail-consumer.ts';
 import { sweepStaleEnvironments } from './scheduled/sweep.ts';
 
 const VERSION = '0.1.0';
@@ -44,6 +49,10 @@ app.get('/version', (c) =>
 );
 
 app.route('/', githubRoutes);
+app.route('/', authRoutes);
+app.route('/', apiRoutes);
+app.route('/', dashboardApi);
+app.route('/', dashboardRoutes);
 
 export { RepoCoordinator } from './do/repo-coordinator.ts';
 export { PrEnvironment } from './do/pr-environment.ts';
@@ -51,7 +60,7 @@ export { LogTail } from './do/log-tail.ts';
 export { ProvisionRunner } from './do/provision-runner.ts';
 export { TeardownRunner } from './do/teardown-runner.ts';
 
-const handler: ExportedHandler<Env, RaftQueueMessage> = {
+const handler: ExportedHandler<Env, RaftQueueMessage | TailEvent> = {
   fetch(req, env, ctx) {
     return app.fetch(req, env, ctx);
   },
@@ -59,7 +68,11 @@ const handler: ExportedHandler<Env, RaftQueueMessage> = {
     ctx.waitUntil(sweepStaleEnvironments(env));
   },
   async queue(batch, env, ctx) {
-    await handleQueueBatch(batch, env, ctx);
+    if (batch.queue === 'raft-tail-events') {
+      await handleTailQueueBatch(batch as unknown as MessageBatch<TailEvent>, env, ctx);
+      return;
+    }
+    await handleQueueBatch(batch as unknown as MessageBatch<RaftQueueMessage>, env, ctx);
   },
 };
 
