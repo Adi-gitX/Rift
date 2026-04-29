@@ -20,6 +20,7 @@ import { CodedError, NonRetryableError } from '@raft/shared-types';
 import type { Env } from '../env.ts';
 import { Logger } from '../lib/logger.ts';
 import { appendAudit } from '../lib/db/auditLog.ts';
+import { getPrEnvironment } from '../lib/db/prEnvironments.ts';
 import { ulid } from '../lib/ids.ts';
 import type { PrEnvironment } from './pr-environment.ts';
 import type { PrEnvState } from '../lib/db/types.ts';
@@ -46,10 +47,27 @@ export class ProvisionRunner extends DurableObject<Env> {
     return (await this.ctx.storage.get<ProvisionRunnerState>(STATE_KEY)) ?? null;
   }
 
+  /** Returns the cached results of every step that has run so far. */
+  async getStepResults(): Promise<Record<string, unknown>> {
+    const out: Record<string, unknown> = {};
+    for (const name of STEP_ORDER) {
+      const cached = await this.ctx.storage.get<unknown>(stepKey(name));
+      if (cached !== undefined) out[name] = cached;
+    }
+    return out;
+  }
+
   override async alarm(): Promise<void> {
     const state = await this.ctx.storage.get<ProvisionRunnerState>(STATE_KEY);
     if (!state) return;
     if (state.status !== 'running') return;
+    // Guard against PR-closed-mid-provision races: if the PR env has been
+    // moved to a terminal state by the teardown path, abort gracefully so
+    // the runner doesn't keep hammering CF API against deleted resources.
+    if (await this.shouldAbortForPrEnvState(state.prEnvId)) {
+      await this.markFailed(state, 'aborted: pr_env in terminal state');
+      return;
+    }
     const step = currentStep(state);
     if (!step) {
       await this.markSucceeded(state);
@@ -104,6 +122,14 @@ export class ProvisionRunner extends DurableObject<Env> {
       if (cached !== undefined) prior[name] = cached;
     }
     return prior;
+  }
+
+  /** Reads the PR env D1 row and returns true if the runner should abort. */
+  private async shouldAbortForPrEnvState(prEnvId: string): Promise<boolean> {
+    const r = await getPrEnvironment(this.env.DB, prEnvId);
+    if (!r.ok || !r.value) return false;
+    const terminal: PrEnvState[] = ['tearing_down', 'torn_down', 'failed'];
+    return terminal.includes(r.value.state);
   }
 
   private async advance(state: ProvisionRunnerState): Promise<void> {
