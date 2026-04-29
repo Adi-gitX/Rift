@@ -1,0 +1,10 @@
+/* Public-side grain texture URLs (webpack does not process this file) */
+:root {
+  --grain-url: url("/textures/grain.png");
+}
+.page-grain {
+  background-image: var(--grain-url);
+}
+.page-grain::after {
+  background-image: var(--grain-url);
+}
