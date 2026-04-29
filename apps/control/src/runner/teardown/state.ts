@@ -10,7 +10,7 @@ export type TeardownStep =
   | 'delete-d1'
   | 'delete-kv'
   | 'delete-queue'
-  | 'purge-r2-prefix'
+  | 'purge-bundle-kv'
   | 'evict-do-shard'
   | 'clear-route'
   | 'mark-torn-down';
@@ -21,7 +21,7 @@ export const TEARDOWN_STEP_ORDER: readonly TeardownStep[] = [
   'delete-d1',
   'delete-kv',
   'delete-queue',
-  'purge-r2-prefix',
+  'purge-bundle-kv',
   'evict-do-shard',
   'clear-route',
   'mark-torn-down',
