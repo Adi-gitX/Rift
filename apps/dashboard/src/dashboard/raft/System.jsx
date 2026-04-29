@@ -2,9 +2,17 @@
  * Raft System — live worker health, integrations, cron schedule.
  * Pulls /api/health every 5 seconds.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Activity, Clock, Server, Database, Layers, ListChecks, Network, Radio } from "lucide-react";
 import { api, fmtRelative } from "@/dashboard/raft/api";
+import { HealthHeatbar, MultiLineSparkline, ChartLegend, Colors } from "@/dashboard/raft/charts";
+
+const HEALTH_HISTORY = 60;
+const SPARKLINE_LINES = [
+  { key: "provisions",        color: Colors.primary, label: "provisions" },
+  { key: "teardowns",         color: Colors.ok,      label: "teardowns", dashed: true },
+  { key: "provisions_failed", color: Colors.fail,    label: "failures" },
+];
 
 const StatusPill = ({ status }) => {
   const map = {
@@ -55,17 +63,31 @@ export const RaftSystem = () => {
   const [health, setHealth] = useState(null);
   const [stats, setStats] = useState(null);
   const [tick, setTick] = useState(0);
+  const [history, setHistory] = useState({ control: [], dispatcher: [], tail: [] });
 
   const reload = async () => {
     const [h, s] = await Promise.all([api.health().catch(() => null), api.stats().catch(() => null)]);
-    setHealth(h?.data ?? null);
+    const hd = h?.data ?? null;
+    setHealth(hd);
     setStats(s?.data ?? null);
     setTick((t) => t + 1);
+    setHistory((prev) => {
+      const push = (arr, st) => {
+        const next = [...arr, st === "ok" ? "ok" : st === "unreachable" ? "fail" : "pending"];
+        return next.slice(-HEALTH_HISTORY);
+      };
+      return {
+        control:    push(prev.control,    hd?.control?.status ?? "?"),
+        dispatcher: push(prev.dispatcher, hd?.dispatcher?.status ?? "?"),
+        tail:       push(prev.tail,       hd?.tail?.status ?? "?"),
+      };
+    });
   };
   useEffect(() => {
     reload();
     const id = setInterval(reload, 5000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -106,6 +128,33 @@ export const RaftSystem = () => {
               status={health?.tail?.status ?? "?"}
               httpStatus={health?.tail?.httpStatus}
             />
+          </div>
+        </section>
+
+        {/* Health timeline + activity sparkline */}
+        <section className="grid grid-cols-[1fr_2fr] gap-3">
+          <div className="border border-white/[0.06] rounded p-5">
+            <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold mb-3">Health timeline · last {HEALTH_HISTORY} probes</h2>
+            <div className="space-y-3">
+              {[
+                { name: "raft-control",    samples: history.control },
+                { name: "raft-dispatcher", samples: history.dispatcher },
+                { name: "raft-tail",       samples: history.tail },
+              ].map((row) => (
+                <div key={row.name}>
+                  <div className="text-[10.5px] d-mono text-white/55 mb-1">{row.name}</div>
+                  <HealthHeatbar samples={row.samples} />
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-[10px] text-white/35 d-mono">poll every 5s · ~5min visible</p>
+          </div>
+          <div className="border border-white/[0.06] rounded p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Lifecycle activity · 7d</h2>
+              <ChartLegend items={SPARKLINE_LINES} />
+            </div>
+            {stats ? <MultiLineSparkline data={stats.daily} lines={SPARKLINE_LINES} /> : <div className="h-32" />}
           </div>
         </section>
 

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { ENDPOINTS, INTEGRATIONS } from "@/dashboard/nav";
 import { api, fmtRelative, stateTone } from "@/dashboard/raft/api";
+import { Donut, MultiLineSparkline, ChartLegend, StackedBar, Colors } from "@/dashboard/raft/charts";
 
 const Hero = ({ email, deployVersion }) => (
   <section className="px-10 pt-10 pb-7" data-testid="overview-hero">
@@ -74,52 +75,11 @@ const StatCardRow = ({ stats, navigate }) => {
   );
 };
 
-/** 7-day daily-activity sparkline. */
-const Sparkline = ({ daily }) => {
-  if (!daily || daily.length === 0) {
-    return (
-      <div className="text-[12px] text-white/45 px-1 py-3">No activity in the last 7 days.</div>
-    );
-  }
-  const max = Math.max(1, ...daily.map((d) => Math.max(d.provisions, d.teardowns, d.provisions_failed)));
-  const W = 700, H = 120, pad = 24;
-  const step = (W - pad * 2) / Math.max(1, daily.length - 1);
-  const yScale = (v) => H - pad - (v / max) * (H - pad * 2);
-  const path = (key) =>
-    daily
-      .map((d, i) => `${i === 0 ? "M" : "L"}${(pad + i * step).toFixed(1)},${yScale(d[key]).toFixed(1)}`)
-      .join(" ");
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="block">
-      {/* gridlines */}
-      <g stroke="rgba(255,255,255,0.05)" strokeWidth="1">
-        {[0, 1, 2, 3].map((i) => (
-          <line key={i} x1={pad} x2={W - pad} y1={pad + (i / 3) * (H - pad * 2)} y2={pad + (i / 3) * (H - pad * 2)} />
-        ))}
-      </g>
-      {/* provisions */}
-      <path d={path("provisions")} stroke="#ED462D" strokeWidth="1.6" fill="none" />
-      {/* teardowns */}
-      <path d={path("teardowns")} stroke="#5BE08F" strokeWidth="1.4" fill="none" strokeDasharray="3 4" opacity="0.85" />
-      {/* failures */}
-      <path d={path("provisions_failed")} stroke="#FF8A75" strokeWidth="1.4" fill="none" opacity="0.85" />
-      {/* day labels */}
-      <g fontFamily="Chivo Mono, ui-monospace, monospace" fontSize="9" fill="rgba(255,255,255,0.40)">
-        {daily.map((d, i) => (
-          <text key={d.day} x={(pad + i * step).toFixed(1)} y={H - 4} textAnchor="middle">{d.day.slice(5)}</text>
-        ))}
-      </g>
-    </svg>
-  );
-};
-
-const SparklineLegend = () => (
-  <div className="flex items-center gap-5 text-[11px] d-mono text-white/55">
-    <span className="inline-flex items-center gap-1.5"><span className="h-[2px] w-3 bg-[#ED462D]" /> provisions</span>
-    <span className="inline-flex items-center gap-1.5"><span className="h-[2px] w-3 bg-[#5BE08F]" style={{ borderTop: "1px dashed transparent" }} /> teardowns</span>
-    <span className="inline-flex items-center gap-1.5"><span className="h-[2px] w-3 bg-[#FF8A75]" /> failures</span>
-  </div>
-);
+const SPARKLINE_LINES = [
+  { key: "provisions",        color: Colors.primary, label: "provisions" },
+  { key: "teardowns",         color: Colors.ok,      label: "teardowns", dashed: true },
+  { key: "provisions_failed", color: Colors.fail,    label: "failures" },
+];
 
 const RatesPanel = ({ stats }) => {
   const t = stats?.totals ?? {};
@@ -164,23 +124,57 @@ const FreeTierGauges = ({ stats }) => {
     const pct = Math.min(100, max ? (used / max) * 100 : 0);
     const tone = pct > 80 ? "#FF8A75" : pct > 50 ? "#EAB308" : "#5BE08F";
     return (
-      <div className="px-4 py-3 border border-white/[0.06] rounded">
-        <div className="flex items-center justify-between text-[11px] d-mono text-white/55">
+      <div className="px-3 py-2 border border-white/[0.06] rounded">
+        <div className="flex items-center justify-between text-[10.5px] d-mono text-white/55">
           <span>{label}</span>
           <span className="text-white/85">{used} <span className="text-white/30">/ {max}</span></span>
         </div>
-        <div className="mt-2 h-1 bg-white/[0.06] rounded overflow-hidden">
+        <div className="mt-1.5 h-1 bg-white/[0.06] rounded overflow-hidden">
           <div className="h-1 transition-[width]" style={{ width: `${pct}%`, background: tone }} />
         </div>
       </div>
     );
   };
   return (
-    <div className="grid grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 gap-2">
       <Gauge label="Workers" used={ft.workers?.used ?? 0} max={ft.workers?.max ?? 100} />
       <Gauge label="D1 dbs" used={ft.d1_databases?.used ?? 0} max={ft.d1_databases?.max ?? 10} />
-      <Gauge label="KV namespaces" used={ft.kv_namespaces?.used ?? 0} max={ft.kv_namespaces?.max ?? 1000} />
+      <Gauge label="KV ns" used={ft.kv_namespaces?.used ?? 0} max={ft.kv_namespaces?.max ?? 1000} />
       <Gauge label="Queues" used={ft.queues?.used ?? 0} max={ft.queues?.max ?? 10} />
+    </div>
+  );
+};
+
+const STATE_COLORS = {
+  ready:        "#5BE08F",
+  provisioning: "#EAB308",
+  pending:      "#9aa3a8",
+  updating:     "#EAB308",
+  failed:       "#FF8A75",
+  tearing_down: "#9aa3a8",
+  torn_down:    "rgba(255,255,255,0.30)",
+};
+
+const StateDonut = ({ stats }) => {
+  const counts = stats?.prEnvironments?.by_state ?? {};
+  const slices = Object.entries(counts)
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => ({ label: k, value: v, color: STATE_COLORS[k] ?? "#888" }));
+  const total = slices.reduce((a, s) => a + s.value, 0);
+  return (
+    <div className="flex items-center gap-3 mt-1">
+      <Donut slices={slices} label={total} sub="PR ENVS" />
+      <div className="flex-1 space-y-1.5">
+        {Object.entries(counts).map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between text-[10.5px] d-mono">
+            <span className="inline-flex items-center gap-1.5 text-white/60">
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: STATE_COLORS[k] ?? "#888" }} />
+              {k}
+            </span>
+            <span className="text-white/85">{v}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -304,20 +298,28 @@ export const RaftOverview = () => {
         <RatesPanel stats={stats} />
       </div>
 
-      {/* Sparkline + free-tier gauges side-by-side */}
+      {/* Sparkline + state distribution donut + free-tier gauges */}
       <section className="mt-10 px-10">
-        <div className="grid grid-cols-[2fr_1fr] gap-5">
+        <div className="grid grid-cols-[2fr_1fr_1fr] gap-5">
           <div className="border border-white/[0.06] rounded p-5">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-white/65">Last 7 days</h2>
-              <SparklineLegend />
+              <ChartLegend items={SPARKLINE_LINES} />
             </div>
-            {stats ? <Sparkline daily={stats.daily} /> : <div className="h-32 flex items-center justify-center text-white/40 text-[12px]"><Loader2 size={14} className="animate-spin mr-2" /> loading…</div>}
+            {stats ? (
+              <MultiLineSparkline data={stats.daily} lines={SPARKLINE_LINES} />
+            ) : (
+              <div className="h-32 flex items-center justify-center text-white/40 text-[12px]"><Loader2 size={14} className="animate-spin mr-2" /> loading…</div>
+            )}
+          </div>
+          <div className="border border-white/[0.06] rounded p-5">
+            <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-white/65 mb-2">State distribution</h2>
+            <StateDonut stats={stats} />
           </div>
           <div className="border border-white/[0.06] rounded p-5">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-white/65">Free-tier usage</h2>
-              <span className="text-[10.5px] text-white/35 d-mono uppercase tracking-[0.08em]">$0 per PR</span>
+              <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-white/65">Free tier</h2>
+              <span className="text-[10.5px] text-white/35 d-mono uppercase tracking-[0.08em]">$0 / PR</span>
             </div>
             {stats ? <FreeTierGauges stats={stats} /> : <div className="h-24 flex items-center justify-center text-white/40 text-[12px]"><Loader2 size={14} className="animate-spin mr-2" /> loading…</div>}
           </div>

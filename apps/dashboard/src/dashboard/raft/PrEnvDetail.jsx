@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { PROVISION_STEPS, TEARDOWN_STEPS } from "@/dashboard/nav";
 import { api, fmtDate, fmtRelative, stateTone } from "@/dashboard/raft/api";
+import { StepLatencyBars } from "@/dashboard/raft/charts";
 
 const ACCOUNT_ID = "5aabf3b807d9050ab805de40e0280ef3";
 
@@ -153,16 +154,41 @@ const RunnerStepRow = ({ step, runner, defaultStep }) => {
   );
 };
 
-const StaticStepRow = ({ step, kind }) => (
-  <div className="grid grid-cols-[14px_minmax(0,1fr)_70px] items-center gap-3 px-3 py-2 border-b border-white/[0.04] last:border-b-0">
-    <span className="inline-block h-1.5 w-1.5 rounded-full bg-white/[0.18]" />
-    <div className="min-w-0">
-      <div className="d-mono text-[12.5px] text-white/55">{step.label}</div>
-      {step.desc && <div className="text-[11px] text-white/40 mt-0.5">{step.desc}</div>}
+/** Teardown step row — driven by real TeardownRunner DO snapshot. */
+const TeardownStepRow = ({ step, runner }) => {
+  const cursor = runner?.snapshot?.cursor ?? -1;
+  const status = runner?.snapshot?.status ?? null;
+  const order = TEARDOWN_STEPS.findIndex((s) => s.key === step.key);
+  const isPast = order < cursor || status === "succeeded";
+  const isCurrent = order === cursor && status === "running";
+  const isFailedHere = status === "failed" && order === cursor;
+  const dotColor = isFailedHere
+    ? "#FF8A75"
+    : isPast
+      ? "#9aa3a8"
+      : isCurrent
+        ? "#ED462D"
+        : "rgba(255,255,255,0.18)";
+  return (
+    <div className="grid grid-cols-[14px_minmax(0,1fr)_70px] items-center gap-3 px-3 py-2 border-b border-white/[0.04] last:border-b-0">
+      <span
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{ background: dotColor, boxShadow: isCurrent ? "0 0 8px rgba(237,70,45,0.6)" : undefined }}
+      />
+      <div className="min-w-0">
+        <div className={`d-mono text-[12.5px] ${isCurrent ? "text-white" : isPast ? "text-white/65" : "text-white/40"}`}>
+          {step.label}
+        </div>
+      </div>
+      <span className="text-[10.5px] text-right">
+        {isPast       && <span className="text-white/55">✓ done</span>}
+        {isCurrent    && <span className="text-[#ED462D]">● live</span>}
+        {isFailedHere && <span className="text-[#FF8A75]">✕ failed</span>}
+        {!isPast && !isCurrent && !isFailedHere && <span className="text-white/30">queued</span>}
+      </span>
     </div>
-    <span className="text-[10.5px] text-white/30 text-right">{kind}</span>
-  </div>
-);
+  );
+};
 
 const ActionButton = ({ icon, children, tone = "ghost", onClick, disabled }) => (
   <button
@@ -182,6 +208,33 @@ const ActionButton = ({ icon, children, tone = "ghost", onClick, disabled }) => 
   </button>
 );
 
+/**
+ * Best-effort per-step latency from the runner snapshot. The runner caches a
+ * `step:NAME` result per step but doesn't currently store per-step durations,
+ * so we approximate: completed steps share equal slices of the total runtime,
+ * the in-flight step shows elapsed-since-step-start, queued steps show null.
+ * This visualization is honest about being an approximation; once the runner
+ * persists per-step `started_at`/`finished_at` we can swap in exact values.
+ */
+const buildLatencySteps = (runner) => {
+  const order = PROVISION_STEPS.map((s) => ({ key: s.key, label: s.label }));
+  const snap = runner?.snapshot;
+  if (!snap) return order.map((s) => ({ ...s, ms: null, status: "queued" }));
+  const cursor = snap.cursor ?? 0;
+  const status = snap.status ?? "pending";
+  const started = snap.startedAt ?? null;
+  const finished = snap.finishedAt ?? null;
+  const total = started && finished ? finished - started : started ? Math.max(0, Date.now() - started) : 0;
+  const completed = status === "succeeded" ? order.length : Math.min(cursor, order.length);
+  const perCompleted = completed > 0 ? total / completed : 0;
+  return order.map((s, i) => {
+    if (i < completed) return { ...s, ms: perCompleted, status: "ok" };
+    if (i === cursor && status === "running") return { ...s, ms: total - perCompleted * completed, status: "running" };
+    if (i === cursor && status === "failed")  return { ...s, ms: 0, status: "failed" };
+    return { ...s, ms: null, status: "queued" };
+  });
+};
+
 export const RaftPrEnvDetail = () => {
   const { id: rawId } = useParams();
   const id = decodeURIComponent(rawId ?? "");
@@ -190,6 +243,7 @@ export const RaftPrEnvDetail = () => {
   const [audit, setAudit] = useState([]);
   const [logs, setLogs] = useState([]);
   const [runner, setRunner] = useState(null);
+  const [teardownRunner, setTeardownRunner] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [acting, setActing] = useState(false);
@@ -197,10 +251,11 @@ export const RaftPrEnvDetail = () => {
 
   const refresh = async () => {
     try {
-      const [pe, lr, rn] = await Promise.all([
+      const [pe, lr, rn, tr] = await Promise.all([
         api.prEnvironment(id),
         api.prEnvironmentLogs(id).catch(() => null),
         api.runnerState(id).catch(() => null),
+        api.teardownRunnerState(id).catch(() => null),
       ]);
       if (pe?.data) {
         setPr(pe.data.prEnvironment ?? null);
@@ -208,6 +263,7 @@ export const RaftPrEnvDetail = () => {
       }
       if (lr?.data) setLogs(lr.data.logs ?? []);
       if (rn?.data) setRunner(rn.data);
+      if (tr?.data) setTeardownRunner(tr.data);
       setErr(null);
     } catch (e) {
       setErr(String(e));
@@ -334,13 +390,25 @@ export const RaftPrEnvDetail = () => {
 
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Teardown steps</h2>
+              <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">
+                Teardown steps {teardownRunner?.snapshot && <span className="text-white/35 normal-case tracking-normal d-mono ml-2">(runner: {teardownRunner.snapshot.status ?? "?"})</span>}
+              </h2>
               <span className="text-[10.5px] text-white/35 d-mono">9 destruction steps · 404 = already deleted</span>
             </div>
             <div className="border border-white/[0.06] rounded">
               {TEARDOWN_STEPS.map((s) => (
-                <StaticStepRow key={s.key} step={s} kind={pr.state === "torn_down" ? "✓" : pr.state === "tearing_down" ? "active" : "queued"} />
+                <TeardownStepRow key={s.key} step={s} runner={teardownRunner} />
               ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Step latency</h2>
+              <span className="text-[10.5px] text-white/35 d-mono">{runner?.snapshot?.startedAt && runner?.snapshot?.finishedAt ? `total ${((runner.snapshot.finishedAt - runner.snapshot.startedAt) / 1000).toFixed(2)}s` : "in flight"}</span>
+            </div>
+            <div className="border border-white/[0.06] rounded p-4">
+              <StepLatencyBars steps={buildLatencySteps(runner)} />
             </div>
           </section>
 
