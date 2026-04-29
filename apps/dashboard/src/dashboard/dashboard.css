@@ -1,0 +1,267 @@
+/* =====================================================================
+   DASHBOARD — Rig.ai-inspired tactical design tokens
+   Inherits color palette from landing page, layered onto Shadcn dark theme
+   ===================================================================== */
+
+/* Scoped to the dashboard shell so it never leaks into the landing page */
+.dashboard-shell {
+  /* mirror the landing page palette */
+  --d-bg: #0A0A0A;
+  --d-bg-2: #0d0d0d;
+  --d-bg-3: #111111;
+  --d-fg: #F0EDE6;
+  --d-flame: #ED462D;
+  --d-meadow: #22C55E;
+  --d-amber: #EAB308;
+  --d-fg-04: rgba(240,237,230,0.04);
+  --d-fg-06: rgba(240,237,230,0.06);
+  --d-fg-08: rgba(240,237,230,0.08);
+  --d-fg-12: rgba(240,237,230,0.12);
+  --d-fg-18: rgba(240,237,230,0.18);
+  --d-fg-30: rgba(240,237,230,0.30);
+  --d-fg-45: rgba(240,237,230,0.45);
+  --d-fg-65: rgba(240,237,230,0.65);
+  --d-fg-85: rgba(240,237,230,0.85);
+  --d-flame-12: rgba(237,70,45,0.12);
+  --d-flame-30: rgba(237,70,45,0.30);
+
+  font-family: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  color: var(--d-fg);
+}
+
+/* Display + mono font helpers */
+.d-display {
+  font-family: "YD Yoonche", "Inter", sans-serif;
+  letter-spacing: -0.01em;
+}
+.d-mono {
+  font-family: "Chivo Mono", ui-monospace, monospace;
+  font-feature-settings: "tnum" on, "lnum" on;
+}
+
+/* =====================================================================
+   Eyebrow tag — small × LABEL chip used in landing page ("× THE PROBLEM")
+   ===================================================================== */
+.d-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "Chivo Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--d-fg-65);
+}
+.d-eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background:
+    linear-gradient(currentColor, currentColor) center / 100% 1px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 1px 100% no-repeat;
+  transform: rotate(45deg);
+  opacity: 0.85;
+}
+.d-eyebrow.is-live::before {
+  width: 8px;
+  height: 8px;
+  background: var(--d-flame);
+  border-radius: 50%;
+  transform: none;
+  box-shadow: 0 0 0 0 rgba(237,70,45,0.6);
+  animation: d-pulse 1.6s ease-out infinite;
+}
+
+@keyframes d-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(237,70,45,0.7); }
+  70%  { box-shadow: 0 0 0 8px rgba(237,70,45,0);   }
+  100% { box-shadow: 0 0 0 0   rgba(237,70,45,0);   }
+}
+
+/* =====================================================================
+   Chamfered buttons (clip-path with 8px corner cuts) — landing parity
+   ===================================================================== */
+.d-btn {
+  --chamfer: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+  font-family: "Chivo Mono", ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: transform .2s cubic-bezier(.4,0,.2,1), background .2s ease, color .2s ease, box-shadow .25s ease;
+  clip-path: polygon(
+    var(--chamfer) 0,
+    100% 0,
+    100% calc(100% - var(--chamfer)),
+    calc(100% - var(--chamfer)) 100%,
+    0 100%,
+    0 var(--chamfer)
+  );
+}
+.d-btn:hover { transform: translateY(-1px); }
+.d-btn:active { transform: translateY(0); }
+.d-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+.d-btn-flame {
+  background: var(--d-flame);
+  color: #0a0a0a;
+  box-shadow: 0 0 32px rgba(237,70,45,0.30), 0 4px 12px rgba(237,70,45,0.18);
+}
+.d-btn-flame:hover { background: #ff5a3d; box-shadow: 0 0 50px rgba(237,70,45,0.45), 0 6px 18px rgba(237,70,45,0.28); }
+
+.d-btn-ghost {
+  background: var(--d-fg-04);
+  color: var(--d-fg);
+  box-shadow: inset 0 0 0 1px var(--d-fg-08);
+}
+.d-btn-ghost:hover { background: var(--d-fg-06); box-shadow: inset 0 0 0 1px var(--d-fg-12); }
+
+.d-btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  --chamfer: 6px;
+}
+
+/* =====================================================================
+   Display headings
+   ===================================================================== */
+.d-title-xxl {
+  font-family: "YD Yoonche", "Inter", sans-serif;
+  font-weight: 700;
+  font-size: 44px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--d-fg);
+}
+.d-title-xl {
+  font-family: "YD Yoonche", "Inter", sans-serif;
+  font-weight: 700;
+  font-size: 32px;
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  color: var(--d-fg);
+}
+.d-title-lg {
+  font-family: "YD Yoonche", "Inter", sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--d-fg);
+}
+
+/* =====================================================================
+   Marquee strip (terminal-style status bar under page header)
+   ===================================================================== */
+.d-strip {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 10px 32px;
+  border-bottom: 1px solid var(--d-fg-06);
+  background: linear-gradient(180deg, rgba(237,70,45,0.04), rgba(237,70,45,0) 60%);
+  font-family: "Chivo Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--d-fg-65);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.d-strip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.d-strip-item .num {
+  color: var(--d-fg);
+  font-weight: 600;
+}
+.d-strip-sep {
+  color: var(--d-fg-30);
+  font-size: 10px;
+}
+.d-strip-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--d-flame);
+  box-shadow: 0 0 0 0 rgba(237,70,45,0.6);
+  animation: d-pulse 1.8s ease-out infinite;
+}
+.d-strip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* =====================================================================
+   Status mark (small pulsating dot for "in progress", "live")
+   ===================================================================== */
+.d-live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--d-flame);
+  box-shadow: 0 0 0 0 rgba(237,70,45,0.6);
+  animation: d-pulse 1.6s ease-out infinite;
+}
+.d-live-dot.amber { background: var(--d-amber); box-shadow: 0 0 0 0 rgba(234,179,8,0.6); animation: d-pulse-amber 1.8s ease-out infinite; }
+.d-live-dot.green { background: var(--d-meadow); animation: none; }
+
+@keyframes d-pulse-amber {
+  0%   { box-shadow: 0 0 0 0   rgba(234,179,8,0.6); }
+  70%  { box-shadow: 0 0 0 7px rgba(234,179,8,0);   }
+  100% { box-shadow: 0 0 0 0   rgba(234,179,8,0);   }
+}
+
+/* =====================================================================
+   Crosshair frame corners (for tactical card emphasis)
+   ===================================================================== */
+.d-frame-corners {
+  position: relative;
+}
+.d-frame-corners::before,
+.d-frame-corners::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--d-fg-30);
+  pointer-events: none;
+}
+.d-frame-corners::before {
+  top: -1px; left: -1px;
+  border-right: 0; border-bottom: 0;
+}
+.d-frame-corners::after {
+  bottom: -1px; right: -1px;
+  border-left: 0; border-top: 0;
+}
+
+/* =====================================================================
+   Sidebar accent line (red glow accent under the logo, rig.ai style)
+   ===================================================================== */
+.d-rail-glow {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 84px;
+  pointer-events: none;
+  background:
+    radial-gradient(180px 110px at 30px 18px, rgba(237,70,45,0.45), rgba(237,70,45,0.10) 50%, transparent 80%);
+  mix-blend-mode: screen;
+}
