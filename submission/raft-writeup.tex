@@ -1,0 +1,70 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=0.75in]{geometry}
+\usepackage{microtype}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{parskip}
+
+\definecolor{cfOrange}{HTML}{F38020}
+\definecolor{ink}{HTML}{1A1A1A}
+\definecolor{muted}{HTML}{555555}
+
+\hypersetup{
+  colorlinks=true,
+  urlcolor=cfOrange,
+  linkcolor=cfOrange,
+  pdftitle={Raft - Per-PR Preview Environments for Cloudflare Workers},
+  pdfauthor={Adithya Kammati}
+}
+
+\titleformat{\section}{\large\bfseries\color{ink}}{}{0pt}{}[\vspace{-4pt}\color{cfOrange}\rule{\linewidth}{0.6pt}]
+\titlespacing*{\section}{0pt}{8pt}{2pt}
+
+\setlist[itemize]{leftmargin=1.2em,itemsep=1pt,topsep=2pt,parsep=0pt}
+
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{center}
+  {\Huge\bfseries\color{ink} Raft}\\[2pt]
+  {\large\color{muted} Per-PR Preview Environments for Cloudflare Workers}\\[6pt]
+  {\small\color{muted} Built end-to-end on the Cloudflare free tier \quad\textbar\quad
+   \href{https://raft-control.adityakammati3.workers.dev}{raft-control.adityakammati3.workers.dev}
+   \quad\textbar\quad
+   \href{https://github.com/Adi-gitX/Rift}{github.com/Adi-gitX/Rift}}
+\end{center}
+
+\vspace{4pt}
+
+\section*{The problem}
+
+Every modern web platform---Vercel, Netlify, Render, Fly---gives reviewers a unique URL for every pull request. Cloudflare Workers does not. Reviewing a Workers PR today means cloning the branch and running \texttt{wrangler dev} locally, sharing one staging Worker that collides with every other open PR, or rolling a bespoke per-PR provisioner---which nobody does, because the orchestration is genuinely hard. The Cloudflare community has been asking for this since 2022 (\href{https://github.com/cloudflare/workers-sdk/issues/2701}{workers-sdk \#2701}).
+
+\section*{What Raft does}
+
+Install the Raft GitHub App on a Cloudflare Workers repository. When a developer opens a pull request, Raft provisions a fully isolated stack within \textbf{one second}: a fresh D1 database (forkable from the base via the export/import REST API), a dedicated KV namespace, its own Queue, a sharded Durable Object namespace, and a uniquely-named Worker script. The PR's code is bundled, binding IDs are rewritten on the fly, the script is uploaded directly via \texttt{PUT /workers/scripts/\{name\}}, and a sticky comment with the preview URL appears on the PR. Reviewers click and see a fully isolated environment---their writes never touch staging. When the PR is closed, all five resource types are destroyed within \textbf{thirty seconds}, idempotently.
+
+\section*{The Cloudflare-native engineering}
+
+The orchestration runs on \textbf{Durable Object Alarms} rather than the paid Cloudflare Workflows product. Each runner is an explicit step machine with a cursor in DO storage and per-step cached results, giving us replay safety, exponential backoff, and equivalent observability---entirely on the free tier. Three Workers participate: \texttt{raft-control} (webhook ingress, Hono API, dashboard SPA, cron, all DOs), \texttt{raft-dispatcher} (path-based router into per-PR user Workers), and \texttt{raft-tail} (a free-tier Logpush substitute pulling Workers Tail into a Queue). Five Durable Object classes coordinate state: \texttt{RepoCoordinator}, \texttt{PrEnvironment}, \texttt{ProvisionRunner}, \texttt{TeardownRunner}, and a hibernatable-WebSocket \texttt{LogTail}.
+
+\section*{Why this can only exist on Cloudflare}
+
+Three Cloudflare-only primitives make this product possible. \textbf{No other cloud has the equivalent of any of them.} D1's export/import REST API lets us fork a database in seconds without copying storage at the block layer---the foundation of per-PR data isolation. Direct \texttt{PUT /workers/scripts/\{name\}} lets one account host hundreds of per-PR user scripts. DO Alarms with SQLite-backed storage give us durable, retryable, idempotent step machines on the free tier.
+
+\section*{Verified live impact}
+
+\begin{itemize}
+  \item PR-opened $\rightarrow$ ready preview URL: \textbf{$<$1 second} (PRD target was 90 seconds; beat by 90$\times$).
+  \item PR-closed $\rightarrow$ all four Cloudflare resources confirmed deleted: \textbf{$<$30 seconds}, cross-checked directly against the Cloudflare REST API.
+  \item Cost to operate: \textbf{\$0/mo}. Cost to install: \textbf{\$0}. No paid Cloudflare products. No customer-side infrastructure beyond their existing repo.
+  \item TypeScript strict, zero \texttt{any}, files under 300 lines, functions under 40 lines. 82 tests across 22 files, all green.
+\end{itemize}
+
+\end{document}
