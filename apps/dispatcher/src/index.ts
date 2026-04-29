@@ -2,11 +2,15 @@
  * raft-dispatcher Worker (Slice F, free-tier path).
  *
  *   GET /                    → index page (preview link discovery)
- *   * /<scope>/<rest...>     → forward to <scriptName>.<workers-subdomain>/<rest>
+ *   * /<scope>/<rest...>     → 302 → <scriptName>.<workers-subdomain>/<rest>
  *
- * The internal shared secret is forwarded so the user worker can
- * confirm the request came from raft (defence-in-depth — the script's
- * own *.workers.dev URL is publicly reachable too).
+ * Why a redirect, not a proxy: a Worker fetch()-ing another Worker on
+ * the same *.workers.dev account subdomain is routed internally by the
+ * Cloudflare edge and returns the empty-subdomain placeholder, even
+ * when the target script's subdomain is enabled and serves real
+ * content from the public internet. Redirecting is the only reliable
+ * free-tier path. INTERNAL_DISPATCH_SECRET stays in env for parity
+ * with the production proxy mode but is no longer forwarded.
  */
 interface DispatcherEnv {
   readonly ROUTES: KVNamespace;
@@ -15,11 +19,6 @@ interface DispatcherEnv {
   readonly INTERNAL_DISPATCH_SECRET: string;
 }
 
-const HOP_BY_HOP = new Set([
-  'connection', 'keep-alive', 'transfer-encoding',
-  'upgrade', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer',
-]);
-
 const indexHtml = (origin: string): string =>
   `<!doctype html><title>raft-dispatcher</title>
 <style>body{font:14px ui-monospace,monospace;max-width:48em;margin:3em auto;color:#222}</style>
@@ -27,17 +26,8 @@ const indexHtml = (origin: string): string =>
 <p>Per-PR preview proxy. Reach a PR preview at:</p>
 <pre>${origin}/&lt;scope&gt;/&lt;your-path&gt;</pre>
 <p>where <code>&lt;scope&gt;</code> is the per-PR key (e.g. <code>pr-1--acmeapi</code>) — the
-ProvisionRunner posts the full URL as a sticky comment on the PR.</p>`;
-
-const cleanForwardedHeaders = (req: Request, secret: string): Headers => {
-  const headers = new Headers(req.headers);
-  for (const name of Array.from(headers.keys())) {
-    if (HOP_BY_HOP.has(name.toLowerCase())) headers.delete(name);
-  }
-  headers.set('x-raft-internal', secret);
-  headers.set('x-forwarded-host', req.headers.get('host') ?? '');
-  return headers;
-};
+ProvisionRunner posts the full URL as a sticky comment on the PR. Requests
+are 302-redirected to the per-PR Worker's <code>*.workers.dev</code> URL.</p>`;
 
 const handler: ExportedHandler<DispatcherEnv> = {
   async fetch(req, env, _ctx) {
@@ -55,16 +45,8 @@ const handler: ExportedHandler<DispatcherEnv> = {
       return new Response(`No preview for ${scope}`, { status: 404 });
     }
     const rest = segments.slice(1).join('/');
-    const target = new URL(
-      `https://${scriptName}.${env.CF_WORKERS_SUBDOMAIN}/${rest}${url.search}`,
-    );
-    const init: RequestInit = {
-      method: req.method,
-      headers: cleanForwardedHeaders(req, env.INTERNAL_DISPATCH_SECRET),
-      redirect: 'manual',
-    };
-    if (req.method !== 'GET' && req.method !== 'HEAD') init.body = req.body;
-    return fetch(target, init);
+    const target = `https://${scriptName}.${env.CF_WORKERS_SUBDOMAIN}/${rest}${url.search}`;
+    return Response.redirect(target, 302);
   },
 };
 
