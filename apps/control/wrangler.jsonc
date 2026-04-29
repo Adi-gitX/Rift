@@ -1,0 +1,89 @@
+// raft-control Worker — public entry: GitHub webhooks, internal API, dashboard, cron.
+//
+// Free-tier substitutions applied:
+//   - No R2 (bundles → BUNDLES_KV; no template cache; no log archival)
+//   - No Cloudflare Access (signed cookie auth instead)
+//   - workers.dev URLs, no custom domain
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "raft-control",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-29",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  "vars": {
+    "RAFT_BASE_DOMAIN": "workers.dev",
+    "RAFT_ENV": "production",
+    "CF_WORKERS_SUBDOMAIN": "adityakammati3.workers.dev",
+    "GITHUB_APP_ID": "3540573",
+    "GITHUB_APP_CLIENT_ID": "Iv23lirXMcaWBVNTVeIn",
+    "CF_OWN_ACCOUNT_ID": "5aabf3b807d9050ab805de40e0280ef3",
+    "ACCESS_TEAM_DOMAIN": "N/A",
+    "ACCESS_AUD": "N/A"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "raft-meta",
+      "database_id": "eb849416-6b7a-4286-91bb-f74cb0b8de55",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "kv_namespaces": [
+    { "binding": "CACHE",      "id": "678cd095f9dd45fd9d4e47b7e1c8610a" },
+    { "binding": "ROUTES",     "id": "51028e006702422181200bf121d5af1e" },
+    { "binding": "BUNDLES_KV", "id": "0e795833aded46d59fa31d1457fb8f8a" }
+  ],
+
+  "queues": {
+    "producers": [
+      { "binding": "EVENTS",      "queue": "raft-events" },
+      { "binding": "TAIL_EVENTS", "queue": "raft-tail-events" }
+    ],
+    "consumers": [
+      {
+        "queue": "raft-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 2,
+        "max_retries": 5,
+        "dead_letter_queue": "raft-events-dlq"
+      },
+      {
+        "queue": "raft-tail-events",
+        "max_batch_size": 50,
+        "max_batch_timeout": 1,
+        "max_retries": 3
+      }
+    ]
+  },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "REPO",             "class_name": "RepoCoordinator" },
+      { "name": "PR_ENV",           "class_name": "PrEnvironment" },
+      { "name": "LOGTAIL",          "class_name": "LogTail" },
+      { "name": "PROVISION_RUNNER", "class_name": "ProvisionRunner" },
+      { "name": "TEARDOWN_RUNNER",  "class_name": "TeardownRunner" }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RepoCoordinator",
+        "PrEnvironment",
+        "LogTail",
+        "ProvisionRunner",
+        "TeardownRunner"
+      ]
+    }
+  ]
+}
