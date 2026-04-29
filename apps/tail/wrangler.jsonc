@@ -1,12 +1,18 @@
 // raft-tail Worker (PRD amendment A5).
 //
-// Tail consumer bound to every WfP user-Worker via `tail_consumers` in their
-// upload metadata. Forwards trace events to a queue that the LogTail DO drains
-// for the dashboard live-log feed. Filled in alongside T11.3 (LogTail).
+// Tail consumer bound to every per-PR user worker via `tail_consumers` in
+// the upload metadata. Forwards trace events to the raft-tail-events
+// queue, which raft-control's queue handler drains into the LogTail DO
+// for hibernatable-WebSocket fan-out to dashboard subscribers.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "raft-tail",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-29",
-  "observability": { "enabled": true }
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  "queues": {
+    "producers": [{ "binding": "TAIL_EVENTS", "queue": "raft-tail-events" }]
+  }
 }
