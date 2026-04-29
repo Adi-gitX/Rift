@@ -106,7 +106,7 @@ describe('Slice E TeardownRunner — alarm-driven 9-step destructor', () => {
       .first<{ state: string }>();
     expect(row?.state).toBe('torn_down');
 
-    const route = await env.ROUTES.get('host:pr-1--td-a.preview.raft.test');
+    const route = await env.ROUTES.get('route:pr-1');
     expect(route).toBeNull();
 
     // Idempotency: re-trigger teardown. Steps are cached in DO storage; the
