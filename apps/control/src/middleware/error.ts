@@ -22,5 +22,15 @@ export const onError = (): ErrorHandler<ControlAppEnv> => (e, c) => {
   return c.json(apiErr('E_INTERNAL', 'Internal server error', requestId), 500);
 };
 
-export const onNotFound = (): NotFoundHandler<ControlAppEnv> => (c) =>
-  c.json(apiErr('E_NOT_FOUND', `Route ${c.req.method} ${c.req.path} not found`, c.var.requestId), 404);
+// API paths return JSON 404. Everything else delegates to the ASSETS binding,
+// which serves the dashboard SPA (index.html fallback for client-side routes
+// is configured via wrangler.jsonc `not_found_handling: single-page-application`).
+export const onNotFound = (): NotFoundHandler<ControlAppEnv> => async (c) => {
+  const path = c.req.path;
+  const isApiPath = path.startsWith('/api/') || path.startsWith('/healthz') || path.startsWith('/version') || path.startsWith('/webhooks/');
+  if (isApiPath) {
+    return c.json(apiErr('E_NOT_FOUND', `Route ${c.req.method} ${path} not found`, c.var.requestId), 404);
+  }
+  // Delegate to the dashboard SPA via static assets.
+  return c.env.ASSETS.fetch(c.req.raw);
+};
