@@ -1,8 +1,8 @@
-# Pranch — Product & Engineering Requirements Document (v1.0)
+# Raft — Product & Engineering Requirements Document (v1.0)
 
 > **Per-Pull-Request ephemeral preview environments for Cloudflare Workers — with fully isolated D1, Durable Objects, R2, KV, and Queues. Built entirely on Cloudflare.**
 >
-> This document is the single source of truth for the Pranch v1 backend. It is written to be handed verbatim to Claude Code in VS Code, an engineering hire, or another AI coding agent. Every API, schema, binding name, environment variable, and task is specified concretely. Where Cloudflare's primitives have constraints, those constraints are called out and worked around.
+> This document is the single source of truth for the Raft v1 backend. It is written to be handed verbatim to Claude Code in VS Code, an engineering hire, or another AI coding agent. Every API, schema, binding name, environment variable, and task is specified concretely. Where Cloudflare's primitives have constraints, those constraints are called out and worked around.
 
 ---
 
@@ -35,7 +35,7 @@
 
 ### 1.1 The product in one paragraph
 
-Pranch is a GitHub App. A team installs it on a repository that deploys to Cloudflare Workers. When a developer opens a pull request, Pranch automatically provisions a fully isolated preview environment for that PR — its own D1 database (forked from the base branch's data), its own Durable Object namespace shard, its own R2 prefix, its own KV namespace, and its own Queue — and deploys the PR's Worker code into a Workers-for-Platforms dispatch namespace. The preview is reachable at `pr-<n>.preview.<your-domain>`, optionally gated behind Cloudflare Access. When the PR is closed or merged, every resource is destroyed automatically. A nightly cron sweeps stale environments.
+Raft is a GitHub App. A team installs it on a repository that deploys to Cloudflare Workers. When a developer opens a pull request, Raft automatically provisions a fully isolated preview environment for that PR — its own D1 database (forked from the base branch's data), its own Durable Object namespace shard, its own R2 prefix, its own KV namespace, and its own Queue — and deploys the PR's Worker code into a Workers-for-Platforms dispatch namespace. The preview is reachable at `pr-<n>.preview.<your-domain>`, optionally gated behind Cloudflare Access. When the PR is closed or merged, every resource is destroyed automatically. A nightly cron sweeps stale environments.
 
 ### 1.2 Why now
 
@@ -51,9 +51,9 @@ No competitor (Vercel, Netlify, Render, Fly) can replicate this stack because no
 
 * **D1 Time Travel cannot fork or clone a database**, only restore in place. The official D1 docs say so explicitly: *"Time Travel does not yet allow you to clone or fork an existing database to a new copy."* The PRD therefore uses **export-to-SQL → create new DB → import-SQL** as the fork mechanism. This is the only supported pattern as of April 2026.
 * **D1 export and import are blocking operations on the source database for their duration.** The control plane must throttle concurrent forks per source DB to 1.
-* **D1 paid-tier limit: 50,000 databases per account, 50 GB total.** Pranch must enforce its own per-tenant cap well below this and surface usage in the dashboard.
+* **D1 paid-tier limit: 50,000 databases per account, 50 GB total.** Raft must enforce its own per-tenant cap well below this and surface usage in the dashboard.
 * **First-time uploads to a dispatch namespace are now synchronous** (changelog item, 2025) — a 200 OK guarantees the script is ready to handle traffic. This simplifies the provisioning sequencer.
-* **Workers for Platforms is a paid add-on** ($25/month minimum). The Pranch backend account must have it enabled before any provisioning will succeed.
+* **Workers for Platforms is a paid add-on** ($25/month minimum). The Raft backend account must have it enabled before any provisioning will succeed.
 
 ---
 
@@ -75,7 +75,7 @@ No competitor (Vercel, Netlify, Render, Fly) can replicate this stack because no
 * NG3. Custom build steps beyond `wrangler deploy` equivalents. The customer's repo must be a deployable Workers project with `wrangler.jsonc` at the root or at a configurable path.
 * NG4. Multi-Worker monorepos. v1 supports one Worker per repo. v2 will use `[env]` blocks.
 * NG5. Visual diff / screenshot comparison. Browser Run integration is a v1.1 nice-to-have, not blocking.
-* NG6. Self-hosted control plane. Pranch is SaaS-first.
+* NG6. Self-hosted control plane. Raft is SaaS-first.
 
 ### 2.3 Success metrics (first 90 days post-launch)
 
@@ -92,7 +92,7 @@ No competitor (Vercel, Netlify, Render, Fly) can replicate this stack because no
 
 ```
 ┌────────────────────────┐                ┌─────────────────────────┐
-│  GitHub                │  webhook       │  Pranch Control Worker  │
+│  GitHub                │  webhook       │  Raft Control Worker  │
 │  (PR open/close/sync)  ├───────────────▶│  routes/github.ts       │
 └────────────────────────┘                │  routes/api.ts          │
                                           │  routes/dashboard.ts    │
@@ -122,7 +122,7 @@ No competitor (Vercel, Netlify, Render, Fly) can replicate this stack because no
 
                             ┌──────────────────────────────────────┐
                             │  Customer's user-Worker (deployed    │
-                            │  into Pranch's WfP dispatch ns)      │
+                            │  into Raft's WfP dispatch ns)      │
                             │  Reachable at:                       │
                             │  https://pr-<n>.preview.<domain>     │
                             └──────────────────────────────────────┘
@@ -130,10 +130,10 @@ No competitor (Vercel, Netlify, Render, Fly) can replicate this stack because no
 
 ### 3.2 The control plane — single Worker, four entry points
 
-A single Worker named `pranch-control` is the only public-internet surface. It exposes:
+A single Worker named `raft-control` is the only public-internet surface. It exposes:
 
 * **`POST /webhooks/github`** — GitHub App webhook receiver (HMAC-SHA256 verified).
-* **`/api/v1/*`** — Internal JSON API used by the dashboard SPA. Authed with Cloudflare Access JWT or a Pranch session cookie issued by Access.
+* **`/api/v1/*`** — Internal JSON API used by the dashboard SPA. Authed with Cloudflare Access JWT or a Raft session cookie issued by Access.
 * **`/dashboard/*`** — Static assets (the React SPA), served via Workers static-assets binding.
 * **Scheduled handler** (cron) — invoked via `crons` config at `0 4 * * *` for stale-environment GC.
 
@@ -141,38 +141,38 @@ There is no separate API tier. Hono is the router. All persistent state lives in
 
 ### 3.3 The provisioning workflow
 
-Provisioning a PR involves 7 sequential Cloudflare API calls and 1 GitHub API call. Failure at any step must (a) record the failure in the per-PR DO, (b) attempt to clean up partially-created resources, and (c) post a clear error comment on the PR with a Pranch dashboard link. We use **Cloudflare Workflows** (durable, retryable steps, persists state across worker restarts) to host this orchestration. Each step is idempotent.
+Provisioning a PR involves 7 sequential Cloudflare API calls and 1 GitHub API call. Failure at any step must (a) record the failure in the per-PR DO, (b) attempt to clean up partially-created resources, and (c) post a clear error comment on the PR with a Raft dashboard link. We use **Cloudflare Workflows** (durable, retryable steps, persists state across worker restarts) to host this orchestration. Each step is idempotent.
 
 ### 3.4 The customer's user Worker — the bundle
 
-The customer is **not** asked to install `wrangler` differently or to change their CI. Pranch reads the customer's repo at the PR's head SHA, runs `wrangler deploy --dry-run --outdir=dist` inside a Containers-backed builder (or, in v1, asks the customer to commit a pre-built bundle to a `pranch-bundles` branch — see §9.4 for the v1 simplification), then re-uploads the bundle into Pranch's WfP dispatch namespace with rewritten bindings.
+The customer is **not** asked to install `wrangler` differently or to change their CI. Raft reads the customer's repo at the PR's head SHA, runs `wrangler deploy --dry-run --outdir=dist` inside a Containers-backed builder (or, in v1, asks the customer to commit a pre-built bundle to a `raft-bundles` branch — see §9.4 for the v1 simplification), then re-uploads the bundle into Raft's WfP dispatch namespace with rewritten bindings.
 
-**v1 explicit scope:** the customer commits to using `wrangler deploy --dry-run` output as input to Pranch. We accept a `dist/` directory with a `worker.js` entry plus a `wrangler.jsonc` describing bindings.
+**v1 explicit scope:** the customer commits to using `wrangler deploy --dry-run` output as input to Raft. We accept a `dist/` directory with a `worker.js` entry plus a `wrangler.jsonc` describing bindings.
 
 ---
 
 ## 4. Cloudflare Resource Inventory
 
-These are the resources Pranch must own at the **control-plane account** level. They are created once at install time (or via a Terraform script) and configured by environment variable.
+These are the resources Raft must own at the **control-plane account** level. They are created once at install time (or via a Terraform script) and configured by environment variable.
 
 | Resource | Purpose | Created |
 |---|---|---|
-| `pranch-control` Worker | Public entry point, routes, dashboard, webhook | `wrangler deploy` |
-| `pranch-meta` D1 database | Customer accounts, installations, billing, audit log | `wrangler d1 create pranch-meta` |
-| `pranch-secrets` Secrets Store | Customer-supplied Cloudflare API tokens (encrypted) | Cloudflare dashboard |
-| `pranch-tenant-d1-templates` R2 bucket | Cached SQL exports of base-branch DBs (TTL 24h) | `wrangler r2 bucket create` |
-| `pranch-logs` R2 bucket | Logpush destination for the control plane and user Workers | `wrangler r2 bucket create` |
-| `pranch-events` Queue | Decouples webhook receipt from provisioning | `wrangler queues create` |
-| `pranch-tenants` WfP dispatch namespace | Holds every customer's per-PR user Worker | `wrangler dispatch-namespace create` |
-| `pranch-dispatcher` Worker | Routes `pr-*.preview.<domain>` traffic | `wrangler deploy` |
+| `raft-control` Worker | Public entry point, routes, dashboard, webhook | `wrangler deploy` |
+| `raft-meta` D1 database | Customer accounts, installations, billing, audit log | `wrangler d1 create raft-meta` |
+| `raft-secrets` Secrets Store | Customer-supplied Cloudflare API tokens (encrypted) | Cloudflare dashboard |
+| `raft-tenant-d1-templates` R2 bucket | Cached SQL exports of base-branch DBs (TTL 24h) | `wrangler r2 bucket create` |
+| `raft-logs` R2 bucket | Logpush destination for the control plane and user Workers | `wrangler r2 bucket create` |
+| `raft-events` Queue | Decouples webhook receipt from provisioning | `wrangler queues create` |
+| `raft-tenants` WfP dispatch namespace | Holds every customer's per-PR user Worker | `wrangler dispatch-namespace create` |
+| `raft-dispatcher` Worker | Routes `pr-*.preview.<domain>` traffic | `wrangler deploy` |
 | `RepoCoordinator` DO class | One instance per (installation, repo) | declared in wrangler |
 | `PrEnvironment` DO class | One instance per (installation, repo, prNumber) | declared in wrangler |
 | `LogTail` DO class | Per-PR ring buffer for live log streaming | declared in wrangler |
 | `ProvisionPR` Workflow class | The 7-step provisioning sequencer | declared in wrangler |
 | `TeardownPR` Workflow class | The destruction sequencer | declared in wrangler |
-| `pranch-control-cache` KV namespace | GitHub installation tokens, rate-limit counters | `wrangler kv namespace create` |
-| `pranch_analytics` Analytics Engine dataset | Per-PR provisioning timings, failure breakdown | declared in wrangler |
-| Cloudflare Access application | Gates the dashboard at `app.pranch.dev` | dashboard |
+| `raft-control-cache` KV namespace | GitHub installation tokens, rate-limit counters | `wrangler kv namespace create` |
+| `raft_analytics` Analytics Engine dataset | Per-PR provisioning timings, failure breakdown | declared in wrangler |
+| Cloudflare Access application | Gates the dashboard at `app.raft.dev` | dashboard |
 
 This is the **complete** list. Anything not on it is not part of v1.
 
@@ -181,9 +181,9 @@ This is the **complete** list. Anything not on it is not part of v1.
 ## 5. Repository Layout
 
 ```
-pranch/
+raft/
 ├── apps/
-│   ├── control/                       # The pranch-control Worker
+│   ├── control/                       # The raft-control Worker
 │   │   ├── src/
 │   │   │   ├── index.ts               # Worker entry, fetch + scheduled handlers
 │   │   │   ├── routes/
@@ -219,7 +219,7 @@ pranch/
 │   │   │   │   ├── api.ts
 │   │   │   │   └── cloudflare-api.ts
 │   │   │   └── env.ts                 # Typed Env interface, single source of truth
-│   │   ├── migrations/                # D1 migrations for pranch-meta
+│   │   ├── migrations/                # D1 migrations for raft-meta
 │   │   │   ├── 0001_init.sql
 │   │   │   ├── 0002_audit_log.sql
 │   │   │   └── 0003_billing.sql
@@ -230,7 +230,7 @@ pranch/
 │   │   ├── wrangler.jsonc
 │   │   └── package.json
 │   │
-│   ├── dispatcher/                    # The pranch-dispatcher Worker
+│   ├── dispatcher/                    # The raft-dispatcher Worker
 │   │   ├── src/index.ts               # Routes pr-N.preview.<domain> → WfP
 │   │   ├── wrangler.jsonc
 │   │   └── package.json
@@ -268,7 +268,7 @@ pranch/
 
 ## 6. Control-Plane Database Schema (D1)
 
-Database name: **`pranch-meta`**. Migrations are stored in `apps/control/migrations/` and applied via `wrangler d1 migrations apply pranch-meta`.
+Database name: **`raft-meta`**. Migrations are stored in `apps/control/migrations/` and applied via `wrangler d1 migrations apply raft-meta`.
 
 ```sql
 -- 0001_init.sql
@@ -299,7 +299,7 @@ CREATE TABLE repos (
   base_r2_bucket    TEXT,                     -- The base R2 bucket (we use prefixes within)
   base_queue_name   TEXT,
   do_class_names    TEXT NOT NULL DEFAULT '[]', -- JSON array of DO class names in customer's worker
-  pranch_config_json TEXT NOT NULL DEFAULT '{}',-- Overrides committed at .pranch.json
+  raft_config_json TEXT NOT NULL DEFAULT '{}',-- Overrides committed at .raft.json
   created_at        INTEGER NOT NULL
 );
 CREATE INDEX idx_repos_installation ON repos(installation_id);
@@ -389,7 +389,7 @@ We use three DO classes. Each has one job. None is more than ~300 lines of TypeS
 **Identity.** `env.REPO.idFromName(`${installationId}:${repoFullName}`)`
 
 **Storage.** SQLite-backed (DO storage API). Holds:
-* `config: PranchRepoConfig` — parsed from the customer's `.pranch.json` (last seen)
+* `config: RaftRepoConfig` — parsed from the customer's `.raft.json` (last seen)
 * `active_pr_count: number`
 * `provisioning_lock: boolean` — single-flight on shared resources (D1 export of base)
 * Active `pr_environments` index for fast listing
@@ -402,7 +402,7 @@ class RepoCoordinator extends DurableObject {
   async onPrClosed(ev: PrClosedEvent): Promise<{ workflowId: string }>;
   async listPrs(): Promise<PrEnvSummary[]>;
   async invalidateBaseExport(): Promise<void>;  // when base branch advances
-  async refreshPranchConfig(headSha: string): Promise<PranchRepoConfig>;
+  async refreshRaftConfig(headSha: string): Promise<RaftRepoConfig>;
 }
 ```
 
@@ -412,7 +412,7 @@ class RepoCoordinator extends DurableObject {
 
 **Identity.** `env.PR_ENV.idFromName(`${repoId}:${prNumber}`)`
 
-**Storage.** Holds the canonical `pr_environments` row plus a small log buffer. The D1 row in `pranch-meta` is the durable record; the DO is the **state machine** and **single-writer** (so we never get into a torn state where two events race to update the same PR).
+**Storage.** Holds the canonical `pr_environments` row plus a small log buffer. The D1 row in `raft-meta` is the durable record; the DO is the **state machine** and **single-writer** (so we never get into a torn state where two events race to update the same PR).
 
 **Methods.**
 ```ts
@@ -458,7 +458,7 @@ Receives Tail Worker output for the user-Worker via a Queue, buffers the last 5 
 
 All routes return JSON. All routes require either:
 * A valid `Cf-Access-Jwt-Assertion` header (verified against your Access app's JWKS), or
-* A signed Pranch session cookie issued after Access SSO.
+* A signed Raft session cookie issued after Access SSO.
 
 Schema validation is **mandatory** on every request body via Zod. Reject with 422 on failure.
 
@@ -515,13 +515,13 @@ type ProvisionParams = {
 
 ### 9.2 Step 1 — `load-config`
 
-* RPC into `RepoCoordinator.refreshPranchConfig(headSha)`.
-* Fetches `.pranch.json` from the head SHA via GitHub `contents` API.
-* Validates against Zod `PranchRepoConfig`. Default config below.
+* RPC into `RepoCoordinator.refreshRaftConfig(headSha)`.
+* Fetches `.raft.json` from the head SHA via GitHub `contents` API.
+* Validates against Zod `RaftRepoConfig`. Default config below.
 * If invalid → mark PR env `failed`, post PR comment with link to docs, end workflow.
 
 ```jsonc
-// .pranch.json — default schema
+// .raft.json — default schema
 {
   "version": 1,
   "worker_path": ".",                // dir containing wrangler.jsonc
@@ -537,7 +537,7 @@ type ProvisionParams = {
 ### 9.3 Step 2 — `prepare-base-export`
 
 * Acquire export-lock on the `RepoCoordinator`.
-* If a fresh (<10 min) base-D1 export exists in R2 (`pranch-tenant-d1-templates`), skip.
+* If a fresh (<10 min) base-D1 export exists in R2 (`raft-tenant-d1-templates`), skip.
 * Otherwise, call **D1 Export API**:
   ```
   POST /accounts/{account_id}/d1/database/{base_d1_id}/export
@@ -548,13 +548,13 @@ type ProvisionParams = {
 
 ### 9.4 Step 3 — `build-bundle`
 
-**v1 simplification.** We do not run user code in v1. We require the customer to commit a tag-prefix that triggers their existing CI to upload `dist/worker.js` + `dist/wrangler.jsonc` to a Pranch-controlled URL with a per-repo upload token. Concretely:
+**v1 simplification.** We do not run user code in v1. We require the customer to commit a tag-prefix that triggers their existing CI to upload `dist/worker.js` + `dist/wrangler.jsonc` to a Raft-controlled URL with a per-repo upload token. Concretely:
 
-* The customer adds one GitHub Action job `pranch-bundle.yml` (we provide it). It runs `wrangler deploy --dry-run --outdir=dist`, zips `dist/`, and POSTs to `https://api.pranch.dev/api/v1/bundles/upload` with `Authorization: Bearer <repo upload token>`.
+* The customer adds one GitHub Action job `raft-bundle.yml` (we provide it). It runs `wrangler deploy --dry-run --outdir=dist`, zips `dist/`, and POSTs to `https://api.raft.dev/api/v1/bundles/upload` with `Authorization: Bearer <repo upload token>`.
 * The control Worker stores the zip in R2 at `bundles/{repo_id}/{headSha}.zip`.
 * This step waits on the upload (with a 5-minute timeout) by polling `deployments` table in D1.
 
-**Why this design.** Running arbitrary `wrangler` builds inside Pranch's account would require Containers + Docker images per language toolchain — out of scope for v1 and a security headache.
+**Why this design.** Running arbitrary `wrangler` builds inside Raft's account would require Containers + Docker images per language toolchain — out of scope for v1 and a security headache.
 
 **v2 plan.** Run builds inside Cloudflare Containers with a sandboxed build image.
 
@@ -563,30 +563,30 @@ type ProvisionParams = {
 In parallel (Promise.all) with hard 30s timeouts each:
 
 * **D1 fork:**
-  1. `POST /accounts/{a}/d1/database` body `{ "name": "pranch-{repo}-pr-{n}-{shortSha}" }` → returns `database.uuid`.
+  1. `POST /accounts/{a}/d1/database` body `{ "name": "raft-{repo}-pr-{n}-{shortSha}" }` → returns `database.uuid`.
   2. Read base SQL from R2; call **D1 Import API** in chunks (5 MB max per request; use `action: 'init'` then `action: 'ingest'` per docs).
   3. Poll until `status === "complete"`.
   4. Write `d1_database_id` to PR env DO.
-* **KV namespace:** `POST /accounts/{a}/storage/kv/namespaces` body `{ "title": "pranch-{repo}-pr-{n}" }`.
-* **Queue:** `POST /accounts/{a}/queues` body `{ "queue_name": "pranch-{repo}-pr-{n}" }`.
-* **R2 prefix:** No API call — prefix is `tenants/{installation}/{repo}/pr-{n}/`. We add a 14-day **lifecycle rule** scoped to that prefix at the Pranch root bucket via the R2 lifecycle API for hygiene.
+* **KV namespace:** `POST /accounts/{a}/storage/kv/namespaces` body `{ "title": "raft-{repo}-pr-{n}" }`.
+* **Queue:** `POST /accounts/{a}/queues` body `{ "queue_name": "raft-{repo}-pr-{n}" }`.
+* **R2 prefix:** No API call — prefix is `tenants/{installation}/{repo}/pr-{n}/`. We add a 14-day **lifecycle rule** scoped to that prefix at the Raft root bucket via the R2 lifecycle API for hygiene.
 * **DO namespace:** No API call — the customer's Worker code uses `env.{CLASS}.idFromName('pr-{n}:' + userScopedKey)`, which we enforce via a code-rewrite step (see §9.6).
 
 If any sub-step fails after retries → enter `failed`, run a partial-teardown of any resources already created.
 
 ### 9.6 Step 5 — `rewrite-bundle`
 
-Take the customer's uploaded bundle, parse `wrangler.jsonc`, and produce a Pranch-rewritten metadata payload for WfP upload. The rewrite:
+Take the customer's uploaded bundle, parse `wrangler.jsonc`, and produce a Raft-rewritten metadata payload for WfP upload. The rewrite:
 
 * Replaces `database_id` of the `d1_databases` binding named `DB` (or whatever `bindings_to_isolate` lists) with the new fork's UUID.
 * Replaces `kv_namespaces` IDs.
 * Replaces `queues` producer/consumer `queue` names.
-* For each DO class in `do_classes_to_shard`, wraps the namespace binding such that every `idFromName(name)` automatically prepends `pr-{n}:`. Implementation: we inject a tiny pre-bundled module at `__pranch_rewrite__.js` that monkey-patches `DurableObjectNamespace.prototype.idFromName` and `getByName` on import. The user's code does not change.
-* Sets `R2_PREFIX` env var to `tenants/{installation}/{repo}/pr-{n}/`. The customer is expected to use a tiny `pranch-r2-prefix` helper (we publish on npm) or to opt-in to a wrapper binding `BUCKET_PREFIXED`.
+* For each DO class in `do_classes_to_shard`, wraps the namespace binding such that every `idFromName(name)` automatically prepends `pr-{n}:`. Implementation: we inject a tiny pre-bundled module at `__raft_rewrite__.js` that monkey-patches `DurableObjectNamespace.prototype.idFromName` and `getByName` on import. The user's code does not change.
+* Sets `R2_PREFIX` env var to `tenants/{installation}/{repo}/pr-{n}/`. The customer is expected to use a tiny `raft-r2-prefix` helper (we publish on npm) or to opt-in to a wrapper binding `BUCKET_PREFIXED`.
 
 ### 9.7 Step 6 — `upload-to-wfp`
 
-`PUT /accounts/{a}/workers/dispatch/namespaces/pranch-tenants/scripts/{script_name}` with `multipart/form-data`:
+`PUT /accounts/{a}/workers/dispatch/namespaces/raft-tenants/scripts/{script_name}` with `multipart/form-data`:
 * `metadata` JSON: `main_module`, rewritten `bindings`, `compatibility_date`, `tags: ["installation:<id>", "repo:<id>", "pr:<n>"]`.
 * The rewritten `worker.mjs` plus any sub-modules.
 
@@ -594,15 +594,15 @@ The 200 OK on first upload guarantees the script is ready (per Cloudflare change
 
 ### 9.8 Step 7 — `route-and-comment`
 
-* Compute `preview_hostname = `pr-${n}.${repoSlug}.preview.${PRANCH_BASE_DOMAIN}``. Hostnames are claimed by the dispatcher Worker via a single wildcard Worker route `*.preview.<base>`.
+* Compute `preview_hostname = `pr-${n}.${repoSlug}.preview.${RAFT_BASE_DOMAIN}``. Hostnames are claimed by the dispatcher Worker via a single wildcard Worker route `*.preview.<base>`.
 * Post a sticky comment on the PR via GitHub API:
   ```
-  ### 🌿 Pranch preview
+  ### 🌿 Raft preview
 
-  **URL:** https://pr-42.octo-org-api.preview.pranch.dev
+  **URL:** https://pr-42.octo-org-api.preview.raft.dev
   **Status:** ✅ Ready (provisioned in 73s)
   **Resources:** D1 forked from `main@a3f9c2b`, isolated KV, Queue, DO shard
-  **Logs:** https://app.pranch.dev/p/abc123/logs
+  **Logs:** https://app.raft.dev/p/abc123/logs
   ```
 * Transition PR env DO to `ready`.
 
@@ -617,13 +617,13 @@ The 200 OK on first upload guarantees the script is ready (per Cloudflare change
 `TeardownPR` Workflow steps. Idempotent — can be re-run on any partially-torn-down PR.
 
 1. **`mark-tearing-down`** — DO state transition.
-2. **`delete-wfp-script`** — `DELETE /accounts/{a}/workers/dispatch/namespaces/pranch-tenants/scripts/{name}`.
+2. **`delete-wfp-script`** — `DELETE /accounts/{a}/workers/dispatch/namespaces/raft-tenants/scripts/{name}`.
 3. **`delete-d1`** — `DELETE /accounts/{a}/d1/database/{id}`.
 4. **`delete-kv`** — `DELETE /accounts/{a}/storage/kv/namespaces/{id}`.
 5. **`delete-queue`** — `DELETE /accounts/{a}/queues/{id}`.
 6. **`purge-r2-prefix`** — list + bulk-delete every key under `tenants/{i}/{r}/pr-{n}/`. Use the R2 list-and-delete pattern (1,000 keys per call).
-7. **`evict-do-shard`** — list active DO IDs with namespace prefix `pr-{n}:` via `env.{CLASS}.list({ prefix: 'pr-{n}:' })` (DO list API exists for SQLite-backed DOs); for each, `stub.fetch('https://internal/__pranch_destroy__')`. This requires the customer to opt-in by adding a tiny handler in their DO base class — published as `@pranch/do-cleanup`.
-8. **`update-pr-comment`** — replace with "🌿 Pranch preview torn down ✅".
+7. **`evict-do-shard`** — list active DO IDs with namespace prefix `pr-{n}:` via `env.{CLASS}.list({ prefix: 'pr-{n}:' })` (DO list API exists for SQLite-backed DOs); for each, `stub.fetch('https://internal/__raft_destroy__')`. This requires the customer to opt-in by adding a tiny handler in their DO base class — published as `@raft/do-cleanup`.
+8. **`update-pr-comment`** — replace with "🌿 Raft preview torn down ✅".
 9. **`mark-torn-down`** — DO + D1 row update; emit Analytics Engine event with total environment lifetime.
 
 **Garbage collector cron** (daily at 04:00 UTC):
@@ -648,7 +648,7 @@ async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
 A single file (`lib/cloudflare/client.ts`) wraps `fetch` with:
 
 * Exponential backoff on `429`/`5xx` with jitter (max 5 retries).
-* Per-account-token rate-limiting using a sliding-window counter in the `pranch-control-cache` KV.
+* Per-account-token rate-limiting using a sliding-window counter in the `raft-control-cache` KV.
 * Structured logging of every call with `request_id` and **redacted token**.
 * Strong typing via Zod schemas for the **subset** of CF API we use. Do not use the official SDK in v1 — it's heavy and opinionated; a thin custom client is cleaner for this surface area.
 
@@ -683,7 +683,7 @@ export class CFClient {
 
 Token storage. Customer Cloudflare API tokens go through the **Cloudflare Secrets Store**, referenced by `secret_id` in the `installations` row. The control Worker fetches them on demand via the Secrets Store binding. Tokens never live in D1 plaintext.
 
-Token scope. The customer-supplied token must have, at minimum: `Account:Workers Scripts:Edit`, `Account:D1:Edit`, `Account:Workers KV Storage:Edit`, `Account:Queues:Edit`, `Account:R2:Edit`, `Account:Workers for Platforms:Edit`. Pranch validates the token's permissions via `GET /user/tokens/verify` at install time and rejects if it can't perform a dry-run.
+Token scope. The customer-supplied token must have, at minimum: `Account:Workers Scripts:Edit`, `Account:D1:Edit`, `Account:Workers KV Storage:Edit`, `Account:Queues:Edit`, `Account:R2:Edit`, `Account:Workers for Platforms:Edit`. Raft validates the token's permissions via `GET /user/tokens/verify` at install time and rejects if it can't perform a dry-run.
 
 ---
 
@@ -693,7 +693,7 @@ This section is non-negotiable.
 
 ### 12.1 Trust boundaries
 
-* **Pranch control plane** — fully trusted; runs Pranch code only.
+* **Raft control plane** — fully trusted; runs Raft code only.
 * **Customer Cloudflare account** — semi-trusted; we have a delegated token. We never give the customer code access to the token.
 * **Customer user-Worker** — untrusted; runs in a WfP namespace which Cloudflare guarantees executes "in untrusted mode" — no `request.cf` access, no shared cache. We additionally configure an **Outbound Worker** that logs and optionally blocks egress.
 * **GitHub webhook payloads** — verified via HMAC; otherwise untrusted.
@@ -705,7 +705,7 @@ This section is non-negotiable.
 3. **Verify Cloudflare Access JWT every time** for `/api/v1` and `/dashboard`. JWKS cached for 10 minutes.
 4. **Never bind the control-plane D1 into a user Worker.** The dispatch namespace bindings are computed per-PR and contain only the PR's own resources.
 5. **Per-installation rate limits** in KV: max 30 webhook events/min, max 100 API requests/min. 429 on excess.
-6. **Worker outbound restriction.** The dispatcher's outbound Worker rejects any fetch destined for the Pranch control domain or Cloudflare's API.
+6. **Worker outbound restriction.** The dispatcher's outbound Worker rejects any fetch destined for the Raft control domain or Cloudflare's API.
 7. **Bundle scanning.** Before upload to WfP, the rewritten bundle is checked against a deny-list of suspicious patterns: `eval(`, `Function(`, dynamic import of Cloudflare API URLs. Failure → soft-warn in PR comment, do not block.
 8. **Secrets Store** is used for: customer CF tokens, GitHub App private key, GitHub webhook secret, dashboard session signing key. Nothing else holds these values.
 
@@ -716,7 +716,7 @@ This section is non-negotiable.
 | Forged GitHub webhook | HMAC verification, drop on failure |
 | Malicious PR exfiltrates control-plane state | User-Worker is in WfP namespace with no access to control bindings |
 | Customer leaks own data via preview URL | Optional Cloudflare Access on `*.preview.<domain>` |
-| Stolen Pranch CF token | Tokens in Secrets Store; rotate on suspicion; per-installation tokens are scoped to one CF account |
+| Stolen Raft CF token | Tokens in Secrets Store; rotate on suspicion; per-installation tokens are scoped to one CF account |
 | Bundle includes credential exfil | Deny-list scan + outbound Worker logs all fetches |
 | Resource leak on workflow failure | Tear-down workflow is idempotent; cron sweeps daily |
 
@@ -728,16 +728,16 @@ In `wrangler.jsonc` (`vars` for non-secret, `secrets` for secret):
 
 | Name | Type | Set via | Purpose |
 |---|---|---|---|
-| `PRANCH_BASE_DOMAIN` | var | wrangler | e.g. `pranch.dev` |
-| `PRANCH_ENV` | var | wrangler | `production` / `staging` / `dev` |
+| `RAFT_BASE_DOMAIN` | var | wrangler | e.g. `raft.dev` |
+| `RAFT_ENV` | var | wrangler | `production` / `staging` / `dev` |
 | `GITHUB_APP_ID` | var | wrangler | numeric |
 | `GITHUB_APP_CLIENT_ID` | var | wrangler | |
 | `GITHUB_APP_PRIVATE_KEY` | secret | Secrets Store | RSA private key, PEM |
 | `GITHUB_WEBHOOK_SECRET` | secret | Secrets Store | for HMAC |
-| `CF_OWN_ACCOUNT_ID` | var | wrangler | the account hosting Pranch itself |
-| `CF_DISPATCH_NAMESPACE` | var | wrangler | `pranch-tenants` |
+| `CF_OWN_ACCOUNT_ID` | var | wrangler | the account hosting Raft itself |
+| `CF_DISPATCH_NAMESPACE` | var | wrangler | `raft-tenants` |
 | `ACCESS_AUD` | var | wrangler | Cloudflare Access app AUD tag |
-| `ACCESS_TEAM_DOMAIN` | var | wrangler | `pranch.cloudflareaccess.com` |
+| `ACCESS_TEAM_DOMAIN` | var | wrangler | `raft.cloudflareaccess.com` |
 | `SESSION_SIGNING_KEY` | secret | Secrets Store | HMAC key for session cookies |
 
 The control Worker imports these via the typed `Env` interface in `apps/control/src/env.ts`. **Every binding declared in `wrangler.jsonc` MUST appear in `Env`.** This is enforced by a typecheck in CI.
@@ -751,7 +751,7 @@ The control Worker imports these via the typed `Env` interface in `apps/control/
 ```jsonc
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "pranch-control",
+  "name": "raft-control",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-29",
   "compatibility_flags": ["nodejs_compat"],
@@ -759,22 +759,22 @@ The control Worker imports these via the typed `Env` interface in `apps/control/
   "observability": { "enabled": true },
 
   "routes": [
-    { "pattern": "api.pranch.dev/*", "zone_name": "pranch.dev" },
-    { "pattern": "app.pranch.dev/*", "zone_name": "pranch.dev" }
+    { "pattern": "api.raft.dev/*", "zone_name": "raft.dev" },
+    { "pattern": "app.raft.dev/*", "zone_name": "raft.dev" }
   ],
 
   "vars": {
-    "PRANCH_BASE_DOMAIN": "pranch.dev",
-    "PRANCH_ENV": "production",
+    "RAFT_BASE_DOMAIN": "raft.dev",
+    "RAFT_ENV": "production",
     "GITHUB_APP_ID": "0",
     "CF_OWN_ACCOUNT_ID": "REPLACE_ME",
-    "CF_DISPATCH_NAMESPACE": "pranch-tenants",
-    "ACCESS_TEAM_DOMAIN": "pranch.cloudflareaccess.com",
+    "CF_DISPATCH_NAMESPACE": "raft-tenants",
+    "ACCESS_TEAM_DOMAIN": "raft.cloudflareaccess.com",
     "ACCESS_AUD": "REPLACE_ME"
   },
 
   "d1_databases": [
-    { "binding": "DB", "database_name": "pranch-meta", "database_id": "REPLACE_ME",
+    { "binding": "DB", "database_name": "raft-meta", "database_id": "REPLACE_ME",
       "migrations_dir": "migrations" }
   ],
 
@@ -783,19 +783,19 @@ The control Worker imports these via the typed `Env` interface in `apps/control/
   ],
 
   "r2_buckets": [
-    { "binding": "TEMPLATES", "bucket_name": "pranch-tenant-d1-templates" },
-    { "binding": "BUNDLES",   "bucket_name": "pranch-bundles" },
-    { "binding": "LOGS",      "bucket_name": "pranch-logs" }
+    { "binding": "TEMPLATES", "bucket_name": "raft-tenant-d1-templates" },
+    { "binding": "BUNDLES",   "bucket_name": "raft-bundles" },
+    { "binding": "LOGS",      "bucket_name": "raft-logs" }
   ],
 
   "queues": {
-    "producers": [{ "binding": "EVENTS", "queue": "pranch-events" }],
+    "producers": [{ "binding": "EVENTS", "queue": "raft-events" }],
     "consumers": [{
-      "queue": "pranch-events",
+      "queue": "raft-events",
       "max_batch_size": 10,
       "max_batch_timeout": 2,
       "max_retries": 5,
-      "dead_letter_queue": "pranch-events-dlq"
+      "dead_letter_queue": "raft-events-dlq"
     }]
   },
 
@@ -818,11 +818,11 @@ The control Worker imports these via the typed `Env` interface in `apps/control/
   ],
 
   "analytics_engine_datasets": [
-    { "binding": "ANALYTICS", "dataset": "pranch_analytics" }
+    { "binding": "ANALYTICS", "dataset": "raft_analytics" }
   ],
 
   "dispatch_namespaces": [
-    { "binding": "DISPATCHER", "namespace": "pranch-tenants" }
+    { "binding": "DISPATCHER", "namespace": "raft-tenants" }
   ],
 
   "secrets_store_secrets": [
@@ -843,14 +843,14 @@ The control Worker imports these via the typed `Env` interface in `apps/control/
 
 ```jsonc
 {
-  "name": "pranch-dispatcher",
+  "name": "raft-dispatcher",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-29",
   "routes": [
-    { "pattern": "*.preview.pranch.dev/*", "zone_name": "pranch.dev" }
+    { "pattern": "*.preview.raft.dev/*", "zone_name": "raft.dev" }
   ],
   "dispatch_namespaces": [
-    { "binding": "DISPATCHER", "namespace": "pranch-tenants" }
+    { "binding": "DISPATCHER", "namespace": "raft-tenants" }
   ],
   "observability": { "enabled": true }
 }
@@ -862,25 +862,25 @@ The control Worker imports these via the typed `Env` interface in `apps/control/
 
 ```bash
 # Prereqs: Node 22, pnpm 9, Wrangler 3.96+
-git clone git@github.com:<you>/pranch.git
-cd pranch
+git clone git@github.com:<you>/raft.git
+cd raft
 pnpm install
 
 # 1. Bootstrap CF resources (idempotent; reads .env)
 pnpm exec tsx infra/scripts/bootstrap.ts
 
 # 2. Apply D1 migrations
-pnpm --filter @pranch/control exec wrangler d1 migrations apply pranch-meta --remote
+pnpm --filter @raft/control exec wrangler d1 migrations apply raft-meta --remote
 
 # 3. Run control Worker locally (with --remote so DOs persist; Workflows need real backend)
-pnpm --filter @pranch/control dev
+pnpm --filter @raft/control dev
 
-# 4. Tunnel for GitHub webhooks (Pranch ships its own TUNNEL helper)
+# 4. Tunnel for GitHub webhooks (Raft ships its own TUNNEL helper)
 pnpm exec tsx infra/scripts/tunnel-github.ts
 # → prints: Webhook URL set on GitHub App: https://abcd-1234.trycloudflare.com/webhooks/github
 ```
 
-`infra/scripts/bootstrap.ts` is idempotent and creates: `pranch-meta` D1, `pranch-tenant-d1-templates`/`pranch-bundles`/`pranch-logs` R2 buckets, `pranch-events`/`pranch-events-dlq` queues, `pranch-tenants` dispatch namespace, `pranch-control-cache` KV, `pranch_analytics` Analytics Engine dataset.
+`infra/scripts/bootstrap.ts` is idempotent and creates: `raft-meta` D1, `raft-tenant-d1-templates`/`raft-bundles`/`raft-logs` R2 buckets, `raft-events`/`raft-events-dlq` queues, `raft-tenants` dispatch namespace, `raft-control-cache` KV, `raft_analytics` Analytics Engine dataset.
 
 ---
 
@@ -892,7 +892,7 @@ Three test layers; each layer's command is `pnpm test:<layer>`.
   * Pure functions: HMAC verifier, JWT verifier, bundle rewriter, error taxonomy, schemas.
   * Coverage target: 90%+ on `lib/`.
 * **`integration`** (Vitest with `@cloudflare/workers-vitest-pool`):
-  * Spin up `pranch-control` against a local Miniflare instance.
+  * Spin up `raft-control` against a local Miniflare instance.
   * Mock the Cloudflare REST API with MSW. Verify each step of the provisioning workflow against captured request fixtures.
   * Mock GitHub API similarly.
   * Verify state machine transitions in the DOs end-to-end.
@@ -905,9 +905,9 @@ CI runs `unit` + `integration` on every PR. `e2e` runs nightly on `main`.
 
 ## 17. Observability and Operations
 
-* **Workers Logs (Logpush)** — pushed to R2 `pranch-logs` with 30-day retention. JSON format. Log shape: `{ ts, level, request_id, installation_id, pr_env_id?, msg, ...meta }`.
+* **Workers Logs (Logpush)** — pushed to R2 `raft-logs` with 30-day retention. JSON format. Log shape: `{ ts, level, request_id, installation_id, pr_env_id?, msg, ...meta }`.
 * **Workflows trace UI** — included by default in dashboard for every Provision/Teardown run.
-* **Analytics Engine dataset `pranch_analytics`** — one event per state transition with dimensions: installation, repo, pr, state, prev_state, duration_ms. Queryable via the Analytics Engine SQL API. Surfaced in the dashboard's `Reliability` tab.
+* **Analytics Engine dataset `raft_analytics`** — one event per state transition with dimensions: installation, repo, pr, state, prev_state, duration_ms. Queryable via the Analytics Engine SQL API. Surfaced in the dashboard's `Reliability` tab.
 * **Alerts (set in CF dashboard)**:
   * Workflow failure rate > 1% over 1 h → page on-call.
   * Provisioning p95 latency > 180 s over 1 h → warn.
@@ -924,7 +924,7 @@ This section is **prescriptive**. Each task is ~2–4 hours. Each task has accep
 * **T1.1** Initialize pnpm monorepo with the layout in §5. Add `tsconfig.base.json`, ESLint, Prettier, Vitest, Wrangler.
 * **T1.2** Implement `apps/control/src/env.ts` with the typed `Env` interface mirroring §14.
 * **T1.3** Implement `apps/control/src/index.ts` with Hono router, `/healthz`, `/version`, error handling middleware, request-id middleware.
-* **Acceptance:** `pnpm --filter @pranch/control dev` boots, `curl localhost:8787/healthz` returns `{ ok: true }`.
+* **Acceptance:** `pnpm --filter @raft/control dev` boots, `curl localhost:8787/healthz` returns `{ ok: true }`.
 
 ### Day 2 — D1 schema + migrations + repo layer
 * **T2.1** Write migrations 0001/0002/0003 from §6.
@@ -965,8 +965,8 @@ This section is **prescriptive**. Each task is ~2–4 hours. Each task has accep
 
 ### Day 8 — Dispatcher Worker + DNS
 * **T8.1** Implement `apps/dispatcher/src/index.ts`: parse hostname `pr-<n>.<repo-slug>.preview.<base>` → look up script_name in KV (populated by control during step 7) → `env.DISPATCHER.get(scriptName).fetch(req)`.
-* **T8.2** Configure `*.preview.pranch.dev` Worker route.
-* **T8.3** End-to-end test against a real Pranch dev account with a tiny "hello world" Worker as the customer Worker.
+* **T8.2** Configure `*.preview.raft.dev` Worker route.
+* **T8.3** End-to-end test against a real Raft dev account with a tiny "hello world" Worker as the customer Worker.
 * **Acceptance:** a real PR webhook ends with a real preview URL returning 200.
 
 ### Day 9 — Tear-down + cron GC
@@ -976,7 +976,7 @@ This section is **prescriptive**. Each task is ~2–4 hours. Each task has accep
 * **Acceptance:** `pull_request.closed` ends with all resources deleted (verified via list-after-delete).
 
 ### Day 10 — PR comments + state machine polish
-* **T10.1** Implement `lib/github/pr-comments.ts`: sticky comment by `<!-- pranch:hidden-id -->` HTML marker.
+* **T10.1** Implement `lib/github/pr-comments.ts`: sticky comment by `<!-- raft:hidden-id -->` HTML marker.
 * **T10.2** Wire comment posting/editing into provision step 7 and teardown step 8.
 * **T10.3** Add the `synchronize` flow (re-deploy without re-fork).
 * **Acceptance:** open PR → comment appears; push commit → comment shows new SHA; close PR → comment shows torn-down.
@@ -1002,10 +1002,10 @@ This section is **prescriptive**. Each task is ~2–4 hours. Each task has accep
 
 ### Day 14 — Launch checklist
 * **T14.1** Production environment provisioning: prod CF account, GitHub App in prod, Access app, secrets set.
-* **T14.2** Documentation pass: README, `docs/install.md`, `docs/.pranch.json.md`, `docs/runbooks/*`.
+* **T14.2** Documentation pass: README, `docs/install.md`, `docs/.raft.json.md`, `docs/runbooks/*`.
 * **T14.3** Onboarding flow: GitHub App install → CF token paste → repo selection → "Open a PR to test" wizard.
 * **T14.4** Submit to Cloudflare Workers Launchpad; landing page deployed.
-* **Acceptance:** an external developer can install Pranch on a fresh repo and get a working preview within 10 minutes.
+* **Acceptance:** an external developer can install Raft on a fresh repo and get a working preview within 10 minutes.
 
 ---
 
@@ -1016,14 +1016,14 @@ These are the surprises that cost real engineering hours if missed. Documented h
 1. **D1 Time Travel cannot fork or clone.** Use export → create → import. `wrangler d1 time-travel restore` overwrites in place. Clone/fork is a roadmap item with no ETA.
 2. **D1 export blocks the source DB.** Throttle via `RepoCoordinator` lock (one base export at a time per repo) and cache the SQL in R2 for 10 minutes so multiple concurrent PRs reuse the same export.
 3. **D1 import is also blocking.** That's fine because it blocks only the *new* fork DB, which has no traffic.
-4. **D1 max DBs per account = 50,000 paid, 10 free.** Pranch must enforce a per-installation quota. Default cap: 50 active PR envs per installation.
-5. **Workers for Platforms is not in the free Workers plan.** $25/mo minimum. Pranch's own bill, not the customer's.
+4. **D1 max DBs per account = 50,000 paid, 10 free.** Raft must enforce a per-installation quota. Default cap: 50 active PR envs per installation.
+5. **Workers for Platforms is not in the free Workers plan.** $25/mo minimum. Raft's own bill, not the customer's.
 6. **DO `list({ prefix })` requires the new SQLite-backed storage class.** Migrations declare `new_sqlite_classes`, never `new_classes` (legacy).
 7. **Workers static-assets is one binding per Worker.** The control Worker serves the dashboard SPA; do not create a separate Pages project — it complicates auth.
 8. **Cloudflare Access JWT verification needs JWKS from the team domain**, not from `cloudflare.com`. URL: `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`.
 9. **The `nodejs_compat` flag is required** for Node-style crypto (`crypto.subtle` is fine without it; `node:crypto` is not). Use Web Crypto throughout.
 10. **First-time WfP script uploads are now synchronous** (changelog 2025) — a 200 OK guarantees the script will accept traffic. Earlier docs said otherwise.
-11. **WfP user Workers run in untrusted mode** — no `request.cf` access, no shared cache. This is a feature: customer code can't fingerprint Pranch.
+11. **WfP user Workers run in untrusted mode** — no `request.cf` access, no shared cache. This is a feature: customer code can't fingerprint Raft.
 12. **Wrangler `migrations` block must list new DO classes** with the SQLite tag at every version bump. Forgetting this corrupts deploys silently.
 
 ---
@@ -1043,4 +1043,4 @@ These are the surprises that cost real engineering hours if missed. Documented h
 
 ---
 
-*End of PRD v1.0. Total length ≈ 8,000 words. This document is intentionally complete: a senior engineer (or Claude Code) should be able to build Pranch v1 with no additional design decisions required.*
+*End of PRD v1.0. Total length ≈ 8,000 words. This document is intentionally complete: a senior engineer (or Claude Code) should be able to build Raft v1 with no additional design decisions required.*
