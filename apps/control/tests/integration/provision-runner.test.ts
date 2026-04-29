@@ -89,8 +89,10 @@ describe('Slice D ProvisionRunner — alarm-driven 5-step machine', () => {
     expect(row?.worker_script_name).toBe('raft-99a-acmeapia-pr-1');
     expect(row?.preview_hostname).toBe('pr-1--acme-api-a.preview.raft.test');
 
-    const route = await env.ROUTES.get('host:pr-1--acme-api-a.preview.raft.test');
+    const route = await env.ROUTES.get('route:pr-1');
     expect(route).toBe('raft-99a-acmeapia-pr-1');
+    const reverse = await env.ROUTES.get('script:raft-99a-acmeapia-pr-1:pr');
+    expect(reverse).toBe(prEnvId);
   });
 
   it('idempotency: re-firing alarm after a step completed reuses the cached result', async () => {
