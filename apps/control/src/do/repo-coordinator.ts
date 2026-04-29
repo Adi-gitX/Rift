@@ -111,13 +111,17 @@ const slugForScript = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+
 const buildRunnerState = (payload: PrPayload, prEnvId: string): ProvisionRunnerState => {
   const installShort = slugForScript(payload.installationId);
   const repoShort = slugForScript(payload.repoFullName);
-  const scope = `pr-${payload.prNumber}`;
+  // scope must be globally unique across (repo, PR) so the dispatcher's
+  // path-prefix lookup (`route:<scope>`) doesn't collide. Encode both.
+  const scope = `pr-${payload.prNumber}--${repoShort}`;
   return {
     prEnvId,
     installationId: payload.installationId,
     scope,
     scriptName: buildScriptName(installShort, repoShort, payload.prNumber),
-    previewHostname: `${scope}--${slugForHostname(payload.repoFullName)}.preview.PLACEHOLDER`,
+    // Free-tier substitution: previews are served via the dispatcher Worker
+    // at a path-based URL rather than a wildcard custom subdomain.
+    previewHostname: `https://raft-dispatcher.adityakammati3.workers.dev/${scope}`,
     params: {
       installationId: payload.installationId,
       repoFullName: payload.repoFullName,
@@ -134,8 +138,6 @@ const buildRunnerState = (payload: PrPayload, prEnvId: string): ProvisionRunnerS
     errorHistory: [],
   };
 };
-
-const slugForHostname = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 export const installationFromAccount = async (
   env: Env,
