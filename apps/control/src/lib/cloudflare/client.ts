@@ -45,6 +45,28 @@ export interface CFRequestOptions {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+// DIAGNOSTIC: one-time-per-isolate auth shape log.
+// Originally added to debug a CF_API_TOKEN binding-name mismatch (uploaded
+// secret name didn't match the Env field) that surfaced as 401-on-every-call.
+// Safe to leave in (no token value is logged); remove once we are confident
+// the auth path is stable across deploys.
+let cfAuthDebugLogged = false;
+const logCfAuthDebugOnce = (logger: Logger, token: string): void => {
+  if (cfAuthDebugLogged) return;
+  cfAuthDebugLogged = true;
+  const safe = typeof token === 'string' ? token : String(token);
+  logger.info('cf_auth_debug', {
+    prefix: safe.slice(0, 8),
+    suffix: safe.slice(-4),
+    length: safe.length,
+    has_newline: safe.includes('\n'),
+    has_cr: safe.includes('\r'),
+    has_space: safe.includes(' '),
+    trimmed_length: safe.trim().length,
+    type: typeof token,
+  });
+};
+
 const backoffDelay = (attempt: number, base: number): number => {
   const expo = base * 2 ** attempt;
   const jitter = Math.random() * base;
@@ -67,6 +89,7 @@ export class CFClient {
       logger: opts.logger ?? new Logger({ component: 'cf-client' }),
       fetcher: opts.fetcher ?? globalThis.fetch.bind(globalThis),
     };
+    logCfAuthDebugOnce(this.opts.logger, this.opts.token);
   }
 
   /**
@@ -145,6 +168,15 @@ export class CFClient {
         const res = await this.opts.fetcher(url, init);
         if (res.ok) return ok(res);
         const body = await safeText(res);
+        // DIAGNOSTIC: log the full upstream body so the next 401/4xx tells us
+        // *why* (CF returns a structured error code in the JSON body that the
+        // numeric status alone hides). Pair with `cf_auth_debug` above. Safe
+        // to remove once the auth path is provably stable.
+        this.opts.logger.error('cf_response_error', {
+          status: res.status,
+          url: redactUrl(url),
+          body,
+        });
         const e = new CodedError('E_CF_API', `cf_status_${res.status}`, {
           status: 502,
           details: { upstreamStatus: res.status, body: body.slice(0, 1024) },
@@ -174,6 +206,13 @@ export class CFClient {
     }
     const text = await safeText(res);
     if (!res.ok) {
+      // DIAGNOSTIC: see executeRawWithRetry's note. Same purpose, different
+      // code path. Remove once the auth path is provably stable.
+      this.opts.logger.error('cf_response_error', {
+        status: res.status,
+        url: redactUrl(url),
+        body: text,
+      });
       return err(
         new CodedError('E_CF_API', `cf_status_${res.status}`, {
           status: 502,
