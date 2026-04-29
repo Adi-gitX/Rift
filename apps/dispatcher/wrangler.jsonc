@@ -1,0 +1,9 @@
+// raft-dispatcher Worker — routes pr-N--repo.preview.<base> to the WfP namespace.
+// Filled in T8.1. Day 1: stub config so the workspace resolves.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "raft-dispatcher",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-29",
+  "observability": { "enabled": true }
+}

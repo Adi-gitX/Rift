@@ -1,0 +1,9 @@
+{
+  "extends": "@raft/tsconfig/worker.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "baseUrl": "."
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", ".wrangler", "node_modules"]
+}
