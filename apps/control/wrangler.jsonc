@@ -42,6 +42,15 @@
     { "binding": "BUNDLES_KV", "id": "0e795833aded46d59fa31d1457fb8f8a" }
   ],
 
+  "assets": {
+    "directory": "../dashboard/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+
+  "triggers": { "crons": ["0 4 * * *"] },
+
   "queues": {
     "producers": [
       { "binding": "EVENTS",      "queue": "raft-events" },
