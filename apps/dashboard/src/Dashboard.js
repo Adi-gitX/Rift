@@ -9,20 +9,7 @@ import { RaftRepos, RaftRepoDetail } from "@/dashboard/raft/Repos";
 import { RaftSettings } from "@/dashboard/raft/Settings";
 import { RaftAudit } from "@/dashboard/raft/Audit";
 import { RaftSystem } from "@/dashboard/raft/System";
-
-const RaftStatus = () => (
-  <div className="px-8 pt-10">
-    <h1 className="text-[24px] font-semibold tracking-tight text-white">Live status</h1>
-    <p className="mt-1 text-[13px] text-white/55">
-      raft-control v0.1.0. All systems Cloudflare-native. /version below:
-    </p>
-    <iframe
-      title="raft-control version"
-      src="https://raft-control.adityakammati3.workers.dev/version"
-      className="mt-6 w-full max-w-2xl h-32 bg-black border border-white/[0.06] rounded p-3 text-white/85"
-    />
-  </div>
-);
+import { RaftStatus } from "@/dashboard/raft/Status";
 
 const PAGE_REGISTRY = {
   overview:  () => <RaftOverview />,
