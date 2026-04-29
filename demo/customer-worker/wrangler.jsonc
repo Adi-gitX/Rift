@@ -1,0 +1,29 @@
+// Demo customer Worker — what a Raft-onboarded app looks like.
+//
+// In production (paid WfP path), this file is what Raft reads to know
+// which bindings to isolate per PR. In v1 (free-tier direct upload), the
+// customer's GitHub Action runs `wrangler deploy --dry-run --outdir=dist`
+// against this config and uploads the bundle to Raft.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "demo-customer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-29",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "d1_databases": [
+    { "binding": "DB", "database_name": "demo-app", "database_id": "REPLACE_WITH_REAL_ID_BEFORE_DEPLOY" }
+  ],
+  "kv_namespaces": [
+    { "binding": "KV", "id": "REPLACE_WITH_REAL_ID_BEFORE_DEPLOY" }
+  ],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "demo-jobs" }]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "ChatRoom" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }
+  ]
+}
