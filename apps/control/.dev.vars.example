@@ -3,3 +3,6 @@ GITHUB_WEBHOOK_SECRET="dev-webhook-secret-change-me"
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----"
 SESSION_SIGNING_KEY="dev-session-signing-key-32-bytes"
 INTERNAL_DISPATCH_SECRET="dev-internal-dispatch-shared-secret"
+# CF API token used to provision per-PR D1, KV, Queue, Worker resources.
+# Must have: Account → Workers Scripts:Edit, D1:Edit, KV Storage:Edit, Queues:Edit
+CF_API_TOKEN="cfut_…replace_with_real_token…"
