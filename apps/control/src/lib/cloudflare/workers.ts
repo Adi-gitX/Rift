@@ -97,3 +97,20 @@ export const deleteScript = (
     { method: 'DELETE', path: `/workers/scripts/${scriptName}` },
     z.unknown().transform(() => ({ deleted: true as const })),
   );
+
+// Scripts uploaded via the REST API have their *.workers.dev subdomain
+// disabled by default. Without this call, the public preview URL returns
+// Cloudflare's "There is nothing here yet" placeholder. Idempotent: a
+// second POST with the same payload is a no-op.
+export const enableSubdomain = (
+  client: CFClient,
+  scriptName: string,
+): Promise<Result<{ enabled: true }, CodedError>> =>
+  client.req(
+    {
+      method: 'POST',
+      path: `/workers/scripts/${scriptName}/subdomain`,
+      body: { enabled: true, previews_enabled: false },
+    },
+    z.unknown().transform(() => ({ enabled: true as const })),
+  );
