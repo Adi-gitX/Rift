@@ -19,7 +19,8 @@ export interface Env {
   readonly GITHUB_APP_ID: string;
   readonly GITHUB_APP_CLIENT_ID: string;
   readonly CF_OWN_ACCOUNT_ID: string;
-  readonly CF_DISPATCH_NAMESPACE: string;
+  /** workers.dev subdomain prefix used to route PR previews on the free tier. */
+  readonly CF_WORKERS_SUBDOMAIN: string;
   readonly ACCESS_TEAM_DOMAIN: string;
   readonly ACCESS_AUD: string;
 
@@ -27,16 +28,17 @@ export interface Env {
   readonly DB: D1Database;
 
   // ── KV ────────────────────────────────────────────────────────────────────
+  // Free-tier substitution: PRD §4 used R2 for bundle/template/log storage.
+  // For the free-tier demo we replace the bundle bucket with `BUNDLES_KV`
+  // (bundle blobs base64'd into KV values; small bundles only — capped at
+  // ~25MB per value, which fits a wrangler-deploy --dry-run output).
   readonly CACHE: KVNamespace;
   readonly ROUTES: KVNamespace;
-
-  // ── R2 ────────────────────────────────────────────────────────────────────
-  readonly TEMPLATES: R2Bucket;
-  readonly BUNDLES: R2Bucket;
-  readonly LOGS: R2Bucket;
+  readonly BUNDLES_KV: KVNamespace;
 
   // ── Queues ────────────────────────────────────────────────────────────────
   readonly EVENTS: Queue<RaftQueueMessage>;
+  readonly TAIL_EVENTS: Queue<TailEvent>;
 
   // ── Durable Objects ───────────────────────────────────────────────────────
   // PROVISION_RUNNER / TEARDOWN_RUNNER replace Cloudflare Workflows under the
@@ -64,12 +66,12 @@ export interface Env {
   readonly INTERNAL_DISPATCH_SECRET: string;
 
   /**
-   * Demo-mode shortcut: a single CF API token used for ALL provisioning,
-   * read directly instead of looking up per-installation tokens in Secrets
-   * Store. Production code path goes through `installations.cloudflare_token_secret_id`.
+   * Single CF API token used for ALL provisioning (read directly instead of
+   * looking up per-installation tokens in Secrets Store). Production path
+   * goes through `installations.cloudflare_token_secret_id`.
    * TODO(raft:slice-G) — wire per-installation tokens via the connect endpoint.
    */
-  readonly CF_DEMO_API_TOKEN: string;
+  readonly CF_API_TOKEN: string;
 
   // ── Static assets (the dashboard SPA) ─────────────────────────────────────
   readonly ASSETS: Fetcher;
@@ -123,6 +125,16 @@ export interface InstallationReposPayload {
   readonly installationId: string;
   readonly added: { id: number; full_name: string; default_branch: string }[];
   readonly removed: { id: number; full_name: string }[];
+}
+
+/**
+ * raft-tail-events queue payload — Tail Worker forwards each per-script
+ * trace event into the LogTail DO via this queue (PRD amendment A5).
+ */
+export interface TailEvent {
+  readonly scriptName: string;
+  readonly prEnvId?: string;
+  readonly events: unknown[];
 }
 
 export type RaftQueueMessage =
