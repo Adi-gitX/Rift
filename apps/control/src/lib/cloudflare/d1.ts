@@ -35,6 +35,31 @@ export const createDatabase = (
 ): Promise<Result<D1DatabaseShape, CodedError>> =>
   client.req({ method: 'POST', path: '/d1/database', body: { name } }, d1DatabaseSchema);
 
+/**
+ * Idempotent: try create. On ANY failure, fall back to listing and looking
+ * up the resource by name — CF returns inconsistent error shapes across
+ * resource types when a name collides (some 409, some 200 with
+ * success:false, some 400 with various codes), so it's simpler to treat
+ * "create failed AND a matching resource exists" as success. If the
+ * lookup also fails to find one, propagate the original create error.
+ */
+export const findOrCreateDatabase = async (
+  client: CFClient,
+  name: string,
+): Promise<Result<D1DatabaseShape, CodedError>> => {
+  const create = await createDatabase(client, name);
+  if (create.ok) return create;
+  const list = await client.req(
+    { method: 'GET', path: `/d1/database?name=${encodeURIComponent(name)}&per_page=100` },
+    z.array(z.object({ uuid: z.string(), name: z.string() }).passthrough()),
+  );
+  if (list.ok) {
+    const existing = list.value.find((d) => d.name === name);
+    if (existing) return ok(existing);
+  }
+  return create;
+};
+
 export const deleteDatabase = (
   client: CFClient,
   id: string,
