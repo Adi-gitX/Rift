@@ -54,6 +54,36 @@ export class RepoCoordinator extends DurableObject<Env> {
     initialState: 'pending' | 'updating',
   ): Promise<void> {
     const repoId = repoIdOf(payload.installationId, payload.repoFullName);
+
+    // Quota guard: skip new provisions when the account is dangerously close
+    // to a free-tier cap. The most-binding caps are D1 (10) and Queues (10).
+    // We allow `synchronize` on existing envs through (already counted), but
+    // block fresh `pending` envs that would push us over 9/10.
+    if (initialState === 'pending') {
+      const live = await this.env.DB.prepare(
+        `SELECT
+           (SELECT COUNT(DISTINCT d1_database_id) FROM pr_environments WHERE d1_database_id IS NOT NULL AND state NOT IN ('torn_down','failed')) AS d1,
+           (SELECT COUNT(DISTINCT queue_id)       FROM pr_environments WHERE queue_id       IS NOT NULL AND state NOT IN ('torn_down','failed')) AS q`,
+      ).first<{ d1: number; q: number }>();
+      // 1 D1 + 3 queues are reserved for the control plane.
+      const d1Free = 10 - 1 - (live?.d1 ?? 0);
+      const qFree  = 10 - 3 - (live?.q ?? 0);
+      if (d1Free <= 0 || qFree <= 0) {
+        const r = new Logger({ installation_id: payload.installationId, repo: payload.repoFullName });
+        r.warn('quota_blocked', { d1_free: d1Free, q_free: qFree, pr: payload.prNumber });
+        await appendAudit(this.env.DB, {
+          id: ulid(),
+          installationId: payload.installationId,
+          actor: 'quota-guard',
+          action: 'pr_env.quota_blocked',
+          targetType: 'pr_environment',
+          targetId: prEnvIdOf(repoId, payload.prNumber),
+          metadata: { d1_free: d1Free, q_free: qFree, head: payload.headSha },
+        });
+        return;
+      }
+    }
+
     const prEnv = await createPrEnvironment(this.env.DB, {
       repoId,
       prNumber: payload.prNumber,
