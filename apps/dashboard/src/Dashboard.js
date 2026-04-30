@@ -24,8 +24,8 @@ const PAGE_REGISTRY = {
 const Dashboard = () => {
   const loc = useLocation();
   const navigate = useNavigate();
-  const matchPr = useMatch("/dashboard/pr/:id");
-  const matchRepo = useMatch("/dashboard/repo/:id");
+  const matchPr = useMatch("/dashboard/pr/*");
+  const matchRepo = useMatch("/dashboard/repo/*");
 
   const initialActive = (() => {
     if (matchPr) return "prs";
