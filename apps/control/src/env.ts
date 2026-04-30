@@ -19,9 +19,13 @@ export interface Env {
   readonly GITHUB_APP_ID: string;
   readonly GITHUB_APP_CLIENT_ID: string;
   readonly GITHUB_APP_NAME: string;
-  /** Optional. When present, every static-synth preview gets a Claude-written
-   *  summary appended to the sticky PR comment. Skip silently if absent. */
-  readonly ANTHROPIC_API_KEY?: string;
+  /** Optional. Demo-mode source D1 to fork into every per-PR D1 when the
+   *  repo has no `baseD1Id` set. Lets the lifecycle show real schema +
+   *  data on each preview rather than empty DBs. */
+  readonly RAFT_DEMO_BASE_D1_ID?: string;
+  /** Optional Slack-incoming-webhook (or compatible) URL. When set,
+   *  the daily cron posts capacity + stuck-runner alerts here. */
+  readonly RAFT_ALERT_WEBHOOK?: string;
   readonly CF_OWN_ACCOUNT_ID: string;
   /** workers.dev subdomain prefix used to route PR previews on the free tier. */
   readonly CF_WORKERS_SUBDOMAIN: string;
