@@ -18,6 +18,10 @@ export interface Env {
   readonly RAFT_ENV: RaftEnvName;
   readonly GITHUB_APP_ID: string;
   readonly GITHUB_APP_CLIENT_ID: string;
+  readonly GITHUB_APP_NAME: string;
+  /** Optional. When present, every static-synth preview gets a Claude-written
+   *  summary appended to the sticky PR comment. Skip silently if absent. */
+  readonly ANTHROPIC_API_KEY?: string;
   readonly CF_OWN_ACCOUNT_ID: string;
   /** workers.dev subdomain prefix used to route PR previews on the free tier. */
   readonly CF_WORKERS_SUBDOMAIN: string;
