@@ -354,6 +354,36 @@ export const RaftPrEnvDetail = () => {
           {pr.readyAt ? <> · ready {fmtRelative(pr.readyAt)}</> : null}
           {elapsedMs !== null && <> · runner {(elapsedMs / 1000).toFixed(1)}s</>}
         </p>
+        {(() => {
+          const lc = runner?.stepResults?.["load-config"];
+          if (!lc?.mode) return null;
+          if (lc.mode === "static") {
+            return (
+              <div className="mt-2 inline-flex items-center gap-2 rounded border border-emerald-900/60 bg-emerald-950/30 px-2 py-1 text-[11px] d-mono text-[#5BE08F]">
+                <span>● bundle: static-synth</span>
+                <span className="text-white/45">·</span>
+                <span className="text-white/85">{lc.staticSynth?.fileCount ?? 0} files</span>
+                <span className="text-white/45">·</span>
+                <span className="text-white/85">{(((lc.staticSynth?.totalBytes ?? 0)) / 1024).toFixed(1)} KB</span>
+                {(lc.staticSynth?.warnings?.length ?? 0) > 0 && (
+                  <span className="text-[#EAB308]" title={(lc.staticSynth.warnings ?? []).join(" · ")}>
+                    · {lc.staticSynth.warnings.length} warning{lc.staticSynth.warnings.length > 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+            );
+          }
+          if (lc.mode === "fallback") {
+            return (
+              <div className="mt-2 inline-flex items-center gap-2 rounded border border-white/[0.06] bg-white/[0.02] px-2 py-1 text-[11px] d-mono text-white/55">
+                <span>○ bundle: placeholder</span>
+                <span className="text-white/35">·</span>
+                <span>no index.html / no customer bundle yet</span>
+              </div>
+            );
+          }
+          return null;
+        })()}
       </div>
 
       {/* Two-column body */}

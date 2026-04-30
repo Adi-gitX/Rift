@@ -69,7 +69,11 @@ const CodeBlock = ({ children, label }) => {
 const FreeTierGauges = ({ stats }) => {
   if (!stats?.freeTier) return null;
   const ft = stats.freeTier;
-  const Gauge = ({ label, used, max }) => {
+  const Gauge = ({ label, slot }) => {
+    const used = slot?.used ?? 0;
+    const max = slot?.max ?? 0;
+    const pr = slot?.pr_envs ?? 0;
+    const cp = slot?.control_plane ?? 0;
     const pct = Math.min(100, max ? (used / max) * 100 : 0);
     const tone = pct > 80 ? "#FF8A75" : pct > 50 ? "#EAB308" : "#5BE08F";
     return (
@@ -81,15 +85,21 @@ const FreeTierGauges = ({ stats }) => {
         <div className="mt-2 h-1 bg-white/[0.06] rounded overflow-hidden">
           <div className="h-1 transition-[width]" style={{ width: `${pct}%`, background: tone }} />
         </div>
+        {(pr > 0 || cp > 0) && (
+          <div className="mt-1.5 text-[10px] d-mono text-white/40 flex justify-between">
+            <span>{pr} PR env{pr === 1 ? "" : "s"}</span>
+            <span>+ {cp} control-plane</span>
+          </div>
+        )}
       </div>
     );
   };
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Gauge label="Workers" used={ft.workers?.used ?? 0} max={ft.workers?.max ?? 100} />
-      <Gauge label="D1 dbs" used={ft.d1_databases?.used ?? 0} max={ft.d1_databases?.max ?? 10} />
-      <Gauge label="KV namespaces" used={ft.kv_namespaces?.used ?? 0} max={ft.kv_namespaces?.max ?? 1000} />
-      <Gauge label="Queues" used={ft.queues?.used ?? 0} max={ft.queues?.max ?? 10} />
+      <Gauge label="Workers"       slot={ft.workers} />
+      <Gauge label="D1 dbs"        slot={ft.d1_databases} />
+      <Gauge label="KV namespaces" slot={ft.kv_namespaces} />
+      <Gauge label="Queues"        slot={ft.queues} />
     </div>
   );
 };

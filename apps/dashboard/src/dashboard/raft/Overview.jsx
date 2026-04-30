@@ -120,11 +120,16 @@ const RatesPanel = ({ stats }) => {
 
 const FreeTierGauges = ({ stats }) => {
   const ft = stats?.freeTier ?? {};
-  const Gauge = ({ label, used, max }) => {
+  const Gauge = ({ label, slot }) => {
+    const used = slot?.used ?? 0;
+    const max = slot?.max ?? 0;
+    const pr = slot?.pr_envs ?? 0;
+    const cp = slot?.control_plane ?? 0;
     const pct = Math.min(100, max ? (used / max) * 100 : 0);
     const tone = pct > 80 ? "#FF8A75" : pct > 50 ? "#EAB308" : "#5BE08F";
+    const tip = `${pr} PR env${pr === 1 ? "" : "s"} + ${cp} control-plane`;
     return (
-      <div className="px-3 py-2 border border-white/[0.06] rounded">
+      <div className="px-3 py-2 border border-white/[0.06] rounded" title={tip}>
         <div className="flex items-center justify-between text-[10.5px] d-mono text-white/55">
           <span>{label}</span>
           <span className="text-white/85">{used} <span className="text-white/30">/ {max}</span></span>
@@ -137,10 +142,10 @@ const FreeTierGauges = ({ stats }) => {
   };
   return (
     <div className="grid grid-cols-2 gap-2">
-      <Gauge label="Workers" used={ft.workers?.used ?? 0} max={ft.workers?.max ?? 100} />
-      <Gauge label="D1 dbs" used={ft.d1_databases?.used ?? 0} max={ft.d1_databases?.max ?? 10} />
-      <Gauge label="KV ns" used={ft.kv_namespaces?.used ?? 0} max={ft.kv_namespaces?.max ?? 1000} />
-      <Gauge label="Queues" used={ft.queues?.used ?? 0} max={ft.queues?.max ?? 10} />
+      <Gauge label="Workers" slot={ft.workers} />
+      <Gauge label="D1 dbs"  slot={ft.d1_databases} />
+      <Gauge label="KV ns"   slot={ft.kv_namespaces} />
+      <Gauge label="Queues"  slot={ft.queues} />
     </div>
   );
 };

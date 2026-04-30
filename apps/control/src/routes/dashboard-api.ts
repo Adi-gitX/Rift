@@ -144,10 +144,15 @@ dashboardApi.get('/api/stats', async (c) => {
       (SELECT COUNT(*) FROM pr_environments WHERE state='failed')       AS pr_failed,
       (SELECT COUNT(*) FROM pr_environments WHERE state='tearing_down') AS pr_tearing_down,
       (SELECT COUNT(*) FROM pr_environments WHERE state='torn_down')    AS pr_torn_down,
-      (SELECT COUNT(DISTINCT d1_database_id)     FROM pr_environments WHERE d1_database_id     IS NOT NULL) AS d1_used,
-      (SELECT COUNT(DISTINCT kv_namespace_id)    FROM pr_environments WHERE kv_namespace_id    IS NOT NULL) AS kv_used,
-      (SELECT COUNT(DISTINCT queue_id)           FROM pr_environments WHERE queue_id           IS NOT NULL) AS queue_used,
-      (SELECT COUNT(DISTINCT worker_script_name) FROM pr_environments WHERE worker_script_name IS NOT NULL) AS worker_used,
+      -- Count only resources backing currently-live PR envs. Anything in
+      -- 'torn_down' or 'failed' has already been deleted from Cloudflare,
+      -- so it doesn't consume free-tier capacity. Without this filter the
+      -- gauge climbs every time a PR is opened-then-closed and never goes
+      -- down — falsely reporting "free tier full".
+      (SELECT COUNT(DISTINCT d1_database_id)     FROM pr_environments WHERE d1_database_id     IS NOT NULL AND state NOT IN ('torn_down','failed')) AS d1_used,
+      (SELECT COUNT(DISTINCT kv_namespace_id)    FROM pr_environments WHERE kv_namespace_id    IS NOT NULL AND state NOT IN ('torn_down','failed')) AS kv_used,
+      (SELECT COUNT(DISTINCT queue_id)           FROM pr_environments WHERE queue_id           IS NOT NULL AND state NOT IN ('torn_down','failed')) AS queue_used,
+      (SELECT COUNT(DISTINCT worker_script_name) FROM pr_environments WHERE worker_script_name IS NOT NULL AND state NOT IN ('torn_down','failed')) AS worker_used,
       (SELECT COUNT(*) FROM audit_log WHERE action='provision.succeeded') AS provisions_succeeded,
       (SELECT COUNT(*) FROM audit_log WHERE action='provision.failed')    AS provisions_failed,
       (SELECT COUNT(*) FROM audit_log WHERE action='teardown.succeeded')  AS teardowns_succeeded,
@@ -215,13 +220,30 @@ dashboardApi.get('/api/stats', async (c) => {
           teardowns_succeeded:  counts?.teardowns_succeeded  ?? 0,
           teardowns_failed:     counts?.teardowns_failed     ?? 0,
         },
-        freeTier: {
-          // CF Workers Free caps at 100 scripts; D1 free caps at 10 dbs.
-          workers:        { used: counts?.worker_used ?? 0, max: 100 },
-          d1_databases:   { used: counts?.d1_used     ?? 0, max: 10 },
-          kv_namespaces:  { used: counts?.kv_used     ?? 0, max: 1000 },
-          queues:         { used: counts?.queue_used  ?? 0, max: 10 },
-        },
+        freeTier: (() => {
+          // PR-env resources currently consuming free-tier capacity.
+          const prWorkers = counts?.worker_used ?? 0;
+          const prD1      = counts?.d1_used     ?? 0;
+          const prKv      = counts?.kv_used     ?? 0;
+          const prQueues  = counts?.queue_used  ?? 0;
+          // Fixed control-plane overhead — these resources are deployed by
+          // wrangler.jsonc, not tracked in pr_environments, but still count
+          // against the same free-tier caps. Hard-coded because they're
+          // declared in wrangler.jsonc and don't change at runtime.
+          const overhead = {
+            workers: 3,        // raft-control, raft-dispatcher, raft-tail
+            d1: 1,             // raft-meta
+            kv: 3,             // CACHE, ROUTES, BUNDLES_KV
+            queues: 3,         // raft-events, raft-events-dlq, raft-tail-events
+          };
+          // CF free-tier caps: Workers 100 scripts, D1 10 dbs, Queues 10.
+          return {
+            workers:       { used: prWorkers + overhead.workers, max: 100,  pr_envs: prWorkers, control_plane: overhead.workers },
+            d1_databases:  { used: prD1      + overhead.d1,      max: 10,   pr_envs: prD1,      control_plane: overhead.d1 },
+            kv_namespaces: { used: prKv      + overhead.kv,      max: 1000, pr_envs: prKv,      control_plane: overhead.kv },
+            queues:        { used: prQueues  + overhead.queues,  max: 10,   pr_envs: prQueues,  control_plane: overhead.queues },
+          };
+        })(),
         daily: paddedDaily,
       },
       c.var.requestId,

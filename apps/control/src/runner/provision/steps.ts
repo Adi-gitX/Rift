@@ -21,6 +21,14 @@ import type {
 } from '../../lib/bundle-rewriter/types.ts';
 import { type Logger } from '../../lib/logger.ts';
 import { setResourceHandles } from '../../lib/db/prEnvironments.ts';
+import { getInstallationToken } from '../../lib/github/app.ts';
+import { getRepoTree } from '../../lib/github/contents.ts';
+import {
+  detectStatic,
+  fetchAndInlineFiles,
+  synthesizeWorker,
+} from '../../lib/static-site/synth.ts';
+import { upsertStickyComment } from '../../lib/github/comments.ts';
 
 export interface StepContext {
   env: Env;
@@ -38,9 +46,30 @@ export interface StepContext {
   propagationDelayMs?: number;
 }
 
+export type LoadConfigMode = 'static' | 'fallback';
+
+export interface StaticSynthSummary {
+  fileCount: number;
+  totalBytes: number;
+  warnings: string[];
+}
+
 export interface LoadConfigResult {
   wrangler: CustomerWranglerSummary;
   bundleR2Key: string;
+  /**
+   * How the bundle for this PR is being produced.
+   *   'static'   — Raft synthesised a Worker from the customer's static
+   *                files (HTML/CSS/etc.) at headSha. No CI required.
+   *   'fallback' — No customer code source recognised; Raft uploads its
+   *                placeholder so the lifecycle still completes end-to-end.
+   * (`'bundle'` reserved for the customer-pushed bundle path landing in Track A.)
+   */
+  mode: LoadConfigMode;
+  /** Set when mode === 'static'. The full synthesised module source. */
+  staticBundleSource?: string;
+  /** Compact summary for dashboard display. */
+  staticSynth?: StaticSynthSummary;
 }
 
 export interface ProvisionResourcesResult {
@@ -68,6 +97,12 @@ export interface RouteAndCommentResult {
   hostname: string;
   scriptName: string;
   routeKvKey: string;
+  /** GitHub comment id, if the sticky-comment post succeeded. */
+  prCommentId?: number;
+  /** True if a new comment was posted; false if an existing one was updated. */
+  prCommentCreated?: boolean;
+  /** Set when the GitHub call failed. The provision still succeeds. */
+  prCommentSkippedReason?: string;
 }
 
 const FALLBACK_WRANGLER: CustomerWranglerSummary = {
@@ -91,10 +126,75 @@ const PLACEHOLDER_BUNDLE_SOURCE = `export default {
 `;
 
 export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> => {
-  // TODO(raft:slice-G) — in production, fetch `.raft.json` from GitHub at
-  // payload.headSha and parse with Zod. v1 returns a sane default.
-  ctx.log.info('load_config', { pr: ctx.params.prNumber });
-  return { wrangler: FALLBACK_WRANGLER, bundleR2Key: `bundles/${ctx.scriptName}.zip` };
+  // Try to materialise a real bundle from the customer's repo at headSha.
+  // Order:
+  //   1. If a wrangler config is present  → fall through to placeholder for
+  //      now (customer-bundle path lands in Track A).
+  //   2. If `index.html` is present at a recognised root → static synth.
+  //   3. Otherwise → fallback placeholder (lifecycle still completes).
+  ctx.log.info('load_config_start', { pr: ctx.params.prNumber, repo: ctx.params.repoFullName });
+
+  const fallbackResult: LoadConfigResult = {
+    wrangler: FALLBACK_WRANGLER,
+    bundleR2Key: `bundles/${ctx.scriptName}.zip`,
+    mode: 'fallback',
+  };
+
+  // GitHub failures here (bad/missing App private key, repo deleted, GH
+  // outage) shouldn't leave the PR stuck — degrade to the placeholder
+  // bundle and continue. The lifecycle still completes; the operator sees
+  // a warning in the audit log + dashboard. If the customer fixes their
+  // App install, the next push triggers a fresh provision that picks up
+  // the real code.
+  let token: string;
+  try {
+    token = await getInstallationToken(
+      ctx.env.CACHE,
+      { appId: ctx.env.GITHUB_APP_ID, privateKeyPem: ctx.env.GITHUB_APP_PRIVATE_KEY },
+      ctx.params.installationId,
+    );
+  } catch (e) {
+    ctx.log.warn('load_config_install_token_failed_degrading', { error: String(e) });
+    return fallbackResult;
+  }
+
+  let tree;
+  try {
+    tree = await getRepoTree(token, ctx.params.repoFullName, ctx.params.headSha);
+  } catch (e) {
+    ctx.log.warn('load_config_get_tree_failed_degrading', { error: String(e) });
+    return fallbackResult;
+  }
+
+  const detection = detectStatic(tree);
+  if (!detection.isStatic) {
+    ctx.log.info('load_config_no_static_match', { tree_truncated: tree.truncated });
+    return fallbackResult;
+  }
+
+  const synth = await fetchAndInlineFiles(token, ctx.params.repoFullName, detection);
+  if (synth.files.length === 0) {
+    ctx.log.warn('load_config_static_zero_files', { warnings: synth.warnings });
+    return fallbackResult;
+  }
+  const source = synthesizeWorker(synth);
+  ctx.log.info('load_config_static_synth_ok', {
+    files: synth.files.length,
+    bytes: synth.totalBytes,
+    warnings_count: synth.warnings.length,
+  });
+
+  return {
+    wrangler: { ...FALLBACK_WRANGLER, main_module: 'worker.js' },
+    bundleR2Key: `bundles/${ctx.scriptName}.zip`,
+    mode: 'static',
+    staticBundleSource: source,
+    staticSynth: {
+      fileCount: synth.files.length,
+      totalBytes: synth.totalBytes,
+      warnings: synth.warnings,
+    },
+  };
 };
 
 const cfClientFromCtx = (ctx: StepContext): CFClient =>
@@ -153,12 +253,15 @@ const buildRewrite = (
   config: LoadConfigResult,
   provisioned: ProvisionResourcesResult,
 ): RewrittenBundle => {
+  const moduleSource = config.mode === 'static' && config.staticBundleSource
+    ? config.staticBundleSource
+    : PLACEHOLDER_BUNDLE_SOURCE;
   const inputs: BundleInputs = {
     wrangler: config.wrangler,
     modules: [
       {
         name: config.wrangler.main_module,
-        content: PLACEHOLDER_BUNDLE_SOURCE,
+        content: moduleSource,
         contentType: 'application/javascript+module',
       },
     ],
@@ -244,6 +347,28 @@ export const uploadScript = async (ctx: StepContext): Promise<UploadScriptResult
   throw new NonRetryableError('E_CF_API', 'upload_script: propagation_exhausted');
 };
 
+const buildPreviewCommentBody = (
+  ctx: StepContext,
+  config: LoadConfigResult,
+): string => {
+  const dashUrl = `https://raft-control.${ctx.env.CF_WORKERS_SUBDOMAIN}/dashboard/pr/${encodeURIComponent(ctx.prEnvId)}`;
+  const bundleLine = config.mode === 'static' && config.staticSynth
+    ? `**Bundle:** \`static-synth\` · ${config.staticSynth.fileCount} file${config.staticSynth.fileCount === 1 ? '' : 's'} · ${(config.staticSynth.totalBytes / 1024).toFixed(1)} KB`
+    : `**Bundle:** \`placeholder\` (no \`index.html\` found and customer bundle not yet uploaded)`;
+  return [
+    `### 🛟 Raft preview ready`,
+    ``,
+    `**Preview:** ${ctx.previewHostname}/`,
+    ``,
+    bundleLine,
+    `**Scope:** \`${ctx.scope}\` · **Worker:** \`${ctx.scriptName}\``,
+    ``,
+    `[Open in dashboard ↗](${dashUrl})`,
+    ``,
+    `<sub>Per-PR isolated environment provisioned by [Raft](https://github.com/Adi-gitX/Rift) on Cloudflare Workers free tier. Auto-torn-down on PR close.</sub>`,
+  ].join('\n');
+};
+
 export const routeAndComment = async (ctx: StepContext): Promise<RouteAndCommentResult> => {
   // Path-based route used by raft-dispatcher (free-tier: no wildcard subdomain).
   const routeKey = `route:${ctx.scope}`;
@@ -253,12 +378,43 @@ export const routeAndComment = async (ctx: StepContext): Promise<RouteAndComment
   // Reverse index used by the tail-events queue consumer to map script → PR env.
   await ctx.env.ROUTES.put(`script:${ctx.scriptName}:pr`, ctx.prEnvId);
   await setResourceHandles(ctx.env.DB, ctx.prEnvId, { previewHostname: ctx.previewHostname });
-  // TODO(raft:slice-G) — post sticky PR comment via GitHub install token.
-  return {
+
+  // Sticky PR comment. GitHub failures here are non-fatal: the preview is
+  // already live; missing the comment is just a UX regression. The next
+  // pull_request.synchronize will get another shot.
+  const config = ctx.prior['load-config'] as LoadConfigResult | undefined;
+  const result: RouteAndCommentResult = {
     hostname: ctx.previewHostname,
     scriptName: ctx.scriptName,
     routeKvKey: routeKey,
   };
+  if (!config) {
+    result.prCommentSkippedReason = 'load-config result missing';
+    return result;
+  }
+  try {
+    const token = await getInstallationToken(
+      ctx.env.CACHE,
+      { appId: ctx.env.GITHUB_APP_ID, privateKeyPem: ctx.env.GITHUB_APP_PRIVATE_KEY },
+      ctx.params.installationId,
+    );
+    const body = buildPreviewCommentBody(ctx, config);
+    const upsert = await upsertStickyComment({
+      token,
+      ownerRepo: ctx.params.repoFullName,
+      issueNumber: ctx.params.prNumber,
+      body,
+      marker: 'preview',
+    });
+    await setResourceHandles(ctx.env.DB, ctx.prEnvId, { prCommentId: upsert.commentId });
+    result.prCommentId = upsert.commentId;
+    result.prCommentCreated = upsert.created;
+    ctx.log.info('pr_comment_upserted', { comment_id: upsert.commentId, created: upsert.created });
+  } catch (e) {
+    ctx.log.warn('pr_comment_skipped', { error: String(e) });
+    result.prCommentSkippedReason = String(e);
+  }
+  return result;
 };
 
 export const STEP_FNS = {

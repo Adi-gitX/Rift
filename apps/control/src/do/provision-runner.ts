@@ -38,6 +38,13 @@ const stepKey = (name: string): string => `step:${name}`;
 
 export class ProvisionRunner extends DurableObject<Env> {
   async start(state: ProvisionRunnerState): Promise<void> {
+    // Drop any cached step results from a prior provision so this run
+    // re-executes every step against the new headSha / config. Without
+    // this, `pull_request.synchronize` and manual /redeploy would short-
+    // circuit through the cached results and serve stale code.
+    for (const name of STEP_ORDER) {
+      await this.ctx.storage.delete(stepKey(name));
+    }
     const fresh: ProvisionRunnerState = { ...state, status: 'running', startedAt: Date.now() };
     await this.ctx.storage.put(STATE_KEY, fresh);
     await this.ctx.storage.setAlarm(Date.now());
