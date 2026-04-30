@@ -236,8 +236,12 @@ const buildLatencySteps = (runner) => {
 };
 
 export const RaftPrEnvDetail = () => {
-  const { id: rawId } = useParams();
-  const id = decodeURIComponent(rawId ?? "");
+  // Splat route: useParams returns the captured wildcard as `*`. We
+  // decode it once — Chrome decodes %2F → / in the URL bar after
+  // navigation, so the splat may carry literal slashes (which is fine,
+  // they round-trip back into the prEnvId verbatim).
+  const params = useParams();
+  const id = decodeURIComponent(params["*"] ?? "");
   const navigate = useNavigate();
   const [pr, setPr] = useState(null);
   const [audit, setAudit] = useState([]);
@@ -320,6 +324,9 @@ export const RaftPrEnvDetail = () => {
     : null;
   const cfDashWorker = pr.resources?.workerScriptName
     ? `https://dash.cloudflare.com/${ACCOUNT_ID}/workers/services/view/${pr.resources.workerScriptName}/production`
+    : null;
+  const cfWorkerLogs = pr.resources?.workerScriptName
+    ? `https://dash.cloudflare.com/${ACCOUNT_ID}/workers/services/view/${pr.resources.workerScriptName}/production/logs`
     : null;
 
   const tone = stateTone(pr.state);
@@ -443,7 +450,14 @@ export const RaftPrEnvDetail = () => {
           </section>
 
           <section>
-            <h2 className="mb-2 text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Live logs <span className="text-white/35 normal-case tracking-normal d-mono">poll 2s · LogTail DO ring buffer</span></h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Live logs <span className="text-white/35 normal-case tracking-normal d-mono">poll 2s · LogTail DO ring buffer</span></h2>
+              {cfWorkerLogs && (
+                <a href={cfWorkerLogs} target="_blank" rel="noreferrer" className="text-[11px] text-[#ED462D] hover:text-[#ff7a5c] inline-flex items-center gap-1 d-mono">
+                  Open Workers Logs ↗
+                </a>
+              )}
+            </div>
             <pre className="text-[11px] leading-5 text-white/85 max-h-64 overflow-auto bg-black border border-white/[0.06] rounded p-3 d-mono">
 {logs.length === 0
   ? "(no log events yet — bind raft-tail as a tail consumer to stream wrangler tail output here)"
