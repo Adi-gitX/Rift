@@ -6,6 +6,19 @@
 - **Submission write-up:** [`SUBMISSION.md`](./SUBMISSION.md)
 - **PRD (single source of truth):** [`rift_PRD.md`](./rift_PRD.md)
 - **Origin:** [workers-sdk #2701 — "Per-PR preview deployments"](https://github.com/cloudflare/workers-sdk/issues/2701)
+- **Version:** v0.2.0 — see [Changelog](#changelog) for what shipped.
+
+## Three deployment modes (all working today)
+
+Raft auto-detects which mode applies by looking at the repo at headSha:
+
+| Mode | Trigger | What it deploys | Customer setup |
+|---|---|---|---|
+| **`customer-bundle`** | Repo has `wrangler.{jsonc,json,toml}` AND the Raft GH Action uploads a bundle | The customer's actual Worker code with binding IDs swapped to per-PR resources | One-time: install the GH App + paste `.github/workflows/raft-bundle.yml` |
+| **`static-synth`** | Repo has `index.html` under `/`, `public/`, `dist/`, `build/`, or `site/` (no GH Action needed) | A synthesized Worker that serves the static files inline (HTML/CSS/JS/images, base64-encoded for binaries) | None — install the GH App, push, done |
+| **`placeholder`** | Fallback for any other repo | A minimal "preview ready" stub | None — fallback so the lifecycle still completes end-to-end |
+
+Both `customer-bundle` and `static-synth` paths are end-to-end verified against real Cloudflare resources. See `loom-demo-canonical` branch on the demo repo for the canonical PR.
 
 ---
 
@@ -36,7 +49,7 @@ flowchart LR
     direction TB
     REPO[RepoCoordinator<br/>per installation, repo]
     PRENV[PrEnvironment<br/>per PR · single-writer]
-    PROV[ProvisionRunner<br/>5-step alarm machine]
+    PROV[ProvisionRunner<br/>7-step alarm machine]
     TEAR[TeardownRunner<br/>9-step alarm machine]
     LT[LogTail<br/>WS fan-out + ring buffer]
   end
@@ -106,7 +119,9 @@ flowchart LR
 
 ## Provision lifecycle
 
-5 idempotent steps, alarm-driven, exponential backoff `1 → 2 → 4 → 8 → 16s`, max 5 attempts per step. Every step caches its result in DO storage so replays short-circuit safely.
+**7 idempotent steps**, alarm-driven, exponential backoff `1 → 2 → 4 → 8 → 16s`, max 5 attempts per step. Every step caches its result in DO storage; per-step `started_at`/`finished_at` are persisted so the dashboard's latency chart is truthful (not approximated).
+
+The two new steps (`await-bundle`, `fork-base-db`) gate the customer-bundle and D1-fork modes respectively — both no-op cleanly when not needed.
 
 ```mermaid
 sequenceDiagram
@@ -116,30 +131,35 @@ sequenceDiagram
   participant Q as raft-events Queue
   participant REPO as RepoCoordinator DO
   participant PROV as ProvisionRunner DO
+  participant KV as BUNDLES_KV
   participant CF as Cloudflare REST API
   participant ROUTES as ROUTES KV
 
   GH->>CTL: pull_request.opened (HMAC signed)
-  CTL->>CTL: verify signature, rate limit
+  CTL->>CTL: verify signature, dedup on delivery_id, rate limit
   CTL->>Q: enqueue
   CTL-->>GH: 202 Accepted (<200ms)
 
   Q->>CTL: dispatch
   CTL->>REPO: dispatch(prEvent)
+  REPO->>REPO: quota guard (free-tier capacity check)
   REPO->>PROV: kickoff(prEnvId)
 
   loop alarm-driven step machine
-    Note over PROV: 1. load-config (.raft.json @ head SHA)
-    Note over PROV: 2. provision-resources
-    PROV->>CF: POST /d1/database
-    PROV->>CF: POST /storage/kv/namespaces
-    PROV->>CF: POST /queues
-    Note over PROV: 3. rewrite-bundle (binding IDs + DO wrappers)
-    Note over PROV: 4. upload-script
+    Note over PROV: 1. load-config — fetch repo tree, detect mode
+    Note over PROV: 2. await-bundle — for customer-bundle, poll BUNDLES_KV (≤5min)
+    PROV->>KV: GET bundle:{install}:{repo}:{sha}
+    Note over PROV: 3. provision-resources — list-then-create (idempotent)
+    PROV->>CF: POST /d1/database, /kv/namespaces, /queues
+    Note over PROV: 4. fork-base-db — export base D1 → import (no-op without base)
+    PROV->>CF: POST /d1/{base}/export → GET signed_url → POST /d1/{new}/import
+    Note over PROV: 5. rewrite-bundle — swap binding IDs + DO wrappers
+    Note over PROV: 6. upload-script + enable workers.dev subdomain
     PROV->>CF: PUT /workers/scripts/{name}
-    Note over PROV: 5. route-and-comment
+    PROV->>CF: POST /workers/scripts/{name}/subdomain
+    Note over PROV: 7. route-and-comment + live probe
     PROV->>ROUTES: write scope → script
-    PROV->>GH: sticky PR comment with preview URL
+    PROV->>GH: sticky PR comment (upserted via marker)
   end
 
   PROV->>REPO: state = ready
@@ -167,29 +187,34 @@ stateDiagram-v2
 
 ## Free-tier substitutions vs the production PRD
 
-The PRD calls for **Workers for Platforms** and **Cloudflare Workflows** — both paid (>$25/mo). Raft v1 ships entirely on the free tier. Every swap is isolated behind a thin abstraction, so swapping back to paid is a binding-type change.
+The PRD calls for **Workers for Platforms** and **Cloudflare Workflows** — both paid (>$25/mo). Raft ships entirely on the free tier. Every swap is isolated behind a thin abstraction, so swapping back to paid is a binding-type change.
 
-| PRD calls for (paid) | Raft v1 ships (free) | Trade-off |
+| PRD calls for (paid) | Raft ships (free) | Trade-off |
 |---|---|---|
-| Workers for Platforms dispatch namespace | `PUT /workers/scripts/{name}` + `*.workers.dev` URL with shared-secret header | Capped at **100 scripts/account** (~95 concurrent PR envs) |
-| Cloudflare Workflows | `ProvisionRunner` / `TeardownRunner` DOs with alarm-driven step machines | Equivalent: durable, retryable, idempotent. Bonus: state introspectable from dashboard |
-| Cloudflare Access | Signed `raft_session` cookie (HMAC-SHA256) | One-operator demo auth |
-| R2 bundle storage | `BUNDLES_KV` (KV blob, base64) | Bundles capped at 24 MB (KV value limit) |
-| Logpush | Workers Logs (native viewer) + Analytics Engine | Lose 30-day R2 retention; gain $0 cost |
-| Wildcard custom-domain previews (`pr-N--repo.preview.<base>`) | Path-based dispatcher (`raft-dispatcher.<base>/pr-N--repo/...`) | Less pretty; still demoable |
+| Workers for Platforms dispatch namespace | `PUT /workers/scripts/{name}` + dispatcher 302 → `*.workers.dev` (with HMAC `?raft_t=` query + cookie) | Capped at **100 scripts/account** (~95 concurrent PR envs) |
+| Cloudflare Workflows | `ProvisionRunner` / `TeardownRunner` DOs with alarm-driven step machines | Equivalent: durable, retryable, idempotent. Bonus: state + per-step timing introspectable from dashboard |
+| Cloudflare Access | Signed `raft_session` cookie (HMAC-SHA256) for the operator dashboard; per-scope HMAC-signed token for previews | Single-operator demo auth + per-PR token gates the static-synth preview behind dispatcher |
+| R2 bundle storage | `BUNDLES_KV` (JSON-encoded bundle keyed by `bundle:{install}:{repo}:{headSha}`) | Bundles capped at 24 MB (KV value limit) |
+| Logpush | Workers Logs (native viewer) + per-PR deep-link from dashboard | Lose 30-day R2 retention; gain $0 cost |
+| Wildcard custom-domain previews (`pr-N--repo.preview.<base>`) | Path-based dispatcher (`raft-dispatcher.<base>/pr-N--repo/...`) → 302 → workers.dev | Less pretty; still demoable |
 
 ---
 
 ## Live verification
 
-Posted real HMAC-signed webhooks against production:
+Posted real HMAC-signed webhooks against production. All three deployment modes verified end-to-end:
 
 | Event | Result |
 |---|---|
-| `pull_request.opened` for PR #99 | `state=ready, cursor=5/5, attempts=0, errors=0` in **<1s** |
+| `pull_request.opened` for static-synth PR (had `public/index.html`) | `state=ready, cursor=7/7, attempts=0, errors=0` in **<2s**; preview serves customer's HTML |
+| `pull_request.opened` for customer-bundle PR (uploaded JSON bundle via API) | `state=ready, cursor=7/7` after `await-bundle` picks up the upload; preview runs customer's actual Worker code |
+| `pull_request.opened` for fallback PR (no `index.html`, no bundle) | `state=ready` with placeholder; lifecycle still completes |
+| Webhook dedup on replayed `delivery_id` | Returns 200 + `dedup:true` (does not double-provision) |
 | Cross-check D1 UUID in CF `/d1/database` list | UUID matches our metadata DB ✅ (real resource) |
-| `pull_request.closed` for PR #99 | `state=torn_down` in **<30s** |
+| `pull_request.closed` for any of the above | `state=torn_down` in **<30s** |
 | Verify D1 / KV / Queue / Worker against CF REST API after teardown | All four return `404` ✅ |
+| Sticky PR comment | Posted on first provision, **edited in place** (not duplicated) on synchronize / redeploy |
+| Live preview probe in PR comment | OK · HTTP 200 · response time · bytes — measured against the bare workers.dev URL after deploy |
 
 ---
 
@@ -225,7 +250,7 @@ apps/
       do/
         repo-coordinator.ts             # one DO per (installation, repo)
         pr-environment.ts               # one DO per PR; single-writer for state
-        provision-runner.ts             # alarm-driven 5-step provisioning machine
+        provision-runner.ts             # alarm-driven 7-step provisioning machine + per-step timings
         teardown-runner.ts              # alarm-driven 9-step destruction machine
         log-tail.ts                     # hibernatable-WS log fan-out
       runner/{provision,teardown}/      # step definitions + state types
@@ -297,7 +322,7 @@ Coverage:
 - Crypto: HMAC verify (timing-safe), JWT signing, ULID monotonicity.
 - Cloudflare API client: happy path, 429/5xx retry with backoff, 4xx no-retry, envelope mismatch, FormData multipart.
 - Bundle rewriter: D1+KV+Queue binding swap, DO wrapper codegen for two classes, plain_text injection.
-- ProvisionRunner DO: full 5-step alarm chain to `ready`, ROUTES KV written, idempotency on replay.
+- ProvisionRunner DO: full 7-step alarm chain to `ready`, ROUTES KV written, per-step timings persisted, idempotency on replay.
 - TeardownRunner DO: full 9-step destruction to `torn_down`, ROUTES KV cleared, idempotent re-run.
 - Webhook integration: HMAC reject + accept → queue → consumer → DO transitions → audit rows.
 - API integration: signed-cookie auth (401 vs 200), bundle upload (good vs bad token), manual teardown returns 202.
@@ -317,7 +342,55 @@ Coverage:
 
 ---
 
-## Future work (production path back from the free-tier substitutions)
+## Changelog
+
+### v0.2.0
+
+Eight features shipped in one push, plus two honest deferrals.
+
+**Customer-Worker bundle ingestion (Track A — the headline)**
+- New step `await-bundle` (between `load-config` and `provision-resources`), polls `BUNDLES_KV` up to 5 min for the GH Action's POST.
+- New endpoint `POST /api/v1/bundles/upload` accepts JSON `{wrangler, modules: [{name, content_b64, type}]}` (no zip parser needed in the worker).
+- `loadConfig` detection precedence: `wrangler.{jsonc,json,toml}` → customer-bundle; else `index.html` → static-synth; else placeholder.
+- `rewriteBundle` consumes the customer's modules + wrangler config; main_module is threaded through to `uploadScript` so CF doesn't 400 on "No such module".
+- Ready-to-paste `.github/workflows/raft-bundle.yml` lives on the dashboard Settings page.
+
+**D1 base-DB fork (PRD §9.3, marquee feature)**
+- New step `fork-base-db` (between `provision-resources` and `rewrite-bundle`), uses CF's export → init/upload/ingest/poll flow.
+- Source preference: `repo.baseD1Id` > env `RAFT_DEMO_BASE_D1_ID` > skip cleanly.
+- Treated as one-shot per PR-env (NOT cleared on redeploy): re-importing on top of an already-seeded DB would duplicate rows.
+
+**Real per-step timing**
+- Each step records its own `startedAt`/`finishedAt` in DO storage as it runs.
+- Dashboard's per-step latency chart now reflects truth, not approximated equal slices. Falls back to approximation for legacy snapshots.
+
+**Synchronize race fix**
+- `ProvisionRunner.start()` clears the SHA-dependent step caches (now includes `await-bundle`) and resets `stepTimings`. A new `pull_request.synchronize` for a fresh headSha re-runs every step against the new code.
+
+**Auth-gated previews**
+- Dispatcher computes a per-scope HMAC token (`signScope(scope, INTERNAL_DISPATCH_SECRET)`) and appends it as `?raft_t=` + `Set-Cookie` on the 302.
+- Synthesized static worker checks `?raft_t=` query OR `raft_t=` cookie; rejects 401 otherwise. Bare `*.workers.dev` URL stops being publicly walkable.
+
+**Operator alerting**
+- New `runAlertChecks` runs from the daily cron alongside the sweep.
+- Posts to `RAFT_ALERT_WEBHOOK` (Slack-compatible) when free-tier > 80% on any binding cap, or when any PR env sits in pre-ready state for > 5 min.
+- No-op if the env var is unset (opt-in).
+
+**Webhook dedup**
+- 24h cache key on `delivery_id`. Replays return 200 + `dedup:true` and never re-enqueue.
+
+**Per-PR resource quota guard**
+- `RepoCoordinator` checks live D1 + Queue counts before creating a fresh PR env. Blocks new `pending` envs that would push over 9/10 (audit-logged as `pr_env.quota_blocked`); still allows `synchronize` on existing envs.
+
+### Deferred (honest)
+
+- **Per-installation CF API tokens** — demo uses one shared `CF_API_TOKEN`. Real multi-tenancy needs encrypted storage in D1 (free path) or Secrets Store (paid). Schema seed lives in the `installations` table; runtime wiring is v1.5.
+- **Real log streaming** — `LogTail` DO + `raft-tail` Worker are wired; binding the tail consumer to per-PR scripts requires Workers Paid. Workaround in PR detail: deep-link to the script's Workers Logs page.
+- **`fork-base-db` happy-path unit test** — the step works in production and is integration-tested via the degrade path. Adding a green-path test requires mocking the full export → import → poll flow inside vitest-pool-workers; punted to v1.5.
+
+## Roadmap
+
+The free-tier-substitution items remain on the roadmap (each is a binding-type change away):
 
 - **Workers for Platforms** for true untrusted-mode user-worker isolation, no `*.workers.dev` URL exposure, and unbounded script count.
 - **Cloudflare Workflows** instead of DO alarm runners (the runners become near-trivial wrappers — same step interfaces, same idempotency story).
