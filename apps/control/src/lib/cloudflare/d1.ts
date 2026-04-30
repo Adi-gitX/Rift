@@ -162,6 +162,49 @@ export const importSqlAndWait = async (
   return waitForImport(client, databaseId, ingest.value.at_bookmark ?? '');
 };
 
+/**
+ * Drive a base-DB export to completion and download the SQL dump as a
+ * string. Two-stage flow per PRD §9.3:
+ *   1. POST /export → status=active + at_bookmark
+ *   2. POST /export with current_bookmark → poll until status=complete
+ *   3. GET signed_url → SQL bytes
+ */
+export const exportSqlAndWait = async (
+  client: CFClient,
+  databaseId: string,
+): Promise<Result<string, CodedError>> => {
+  const start = await startExport(client, databaseId);
+  if (!start.ok) return err(start.error);
+  let current = start.value;
+  let attempts = 0;
+  while (current.status !== 'complete') {
+    if (current.status === 'error') {
+      return err(new Coded('E_CF_API', `d1_export_error: ${current.error ?? 'unknown'}`));
+    }
+    if (++attempts > POLL_MAX_ATTEMPTS) {
+      return err(new Coded('E_CF_API', 'd1_export_timeout'));
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    const next = await pollExport(client, databaseId, current.at_bookmark ?? '');
+    if (!next.ok) return err(next.error);
+    current = next.value;
+  }
+  if (!current.signed_url) {
+    return err(new Coded('E_CF_API', 'd1_export_missing_signed_url'));
+  }
+  let res: Response;
+  try {
+    res = await fetch(current.signed_url);
+  } catch (cause) {
+    return err(new Coded('E_CF_API', 'd1_export_download_network', { cause }));
+  }
+  if (!res.ok) {
+    return err(new Coded('E_CF_API', `d1_export_download_status_${res.status}`));
+  }
+  const sql = await res.text();
+  return ok(sql);
+};
+
 const waitForImport = async (
   client: CFClient,
   databaseId: string,
