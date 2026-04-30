@@ -38,16 +38,33 @@ const stepKey = (name: string): string => `step:${name}`;
 
 export class ProvisionRunner extends DurableObject<Env> {
   async start(state: ProvisionRunnerState): Promise<void> {
-    // Drop cached results for SHA-dependent steps so this run re-executes
-    // them against the new headSha / config. KEEP `provision-resources`
-    // cached — D1/KV/Queue have deterministic names; re-creating them on
-    // every redeploy would 400 with "name already exists". The resources
-    // are designed to be reused across redeploys of the same PR.
-    const SHA_DEPENDENT_STEPS = ['load-config', 'rewrite-bundle', 'upload-script', 'route-and-comment'] as const;
+    // Drop cached results for steps whose output is bound to the headSha or
+    // a transient external (the customer's bundle upload). KEEP
+    // `provision-resources` cached: D1/KV/Queue have deterministic names,
+    // re-creating them every redeploy would 400. The resources are
+    // intentionally reused across redeploys of the same PR.
+    //
+    // SYNCHRONIZE-RACE NOTE: a synchronize event for a NEW headSha lands
+    // while the alarm is mid-step. DO runtime serialises RPC + alarm so
+    // there's no concurrent execution; the in-flight alarm finishes its
+    // step under the OLD state, then start() overwrites state with a fresh
+    // cursor=0 + cleared SHA-bound caches, and the next alarm runs the new
+    // SHA from scratch. Only fields below need clearing.
+    // fork-base-db is intentionally OMITTED — re-forking on every redeploy
+    // would re-import SQL on top of an already-seeded DB (destructive: rows
+    // duplicate, schema migrations may conflict). Fork is a one-shot per
+    // PR env, like resource creation.
+    const SHA_DEPENDENT_STEPS = ['load-config', 'await-bundle', 'rewrite-bundle', 'upload-script', 'route-and-comment'] as const;
     for (const name of SHA_DEPENDENT_STEPS) {
       await this.ctx.storage.delete(stepKey(name));
     }
-    const fresh: ProvisionRunnerState = { ...state, status: 'running', startedAt: Date.now() };
+    const fresh: ProvisionRunnerState = {
+      ...state,
+      status: 'running',
+      startedAt: Date.now(),
+      // Reset per-step timings so the latency chart reflects this run, not the prior one.
+      stepTimings: {},
+    };
     await this.ctx.storage.put(STATE_KEY, fresh);
     await this.ctx.storage.setAlarm(Date.now());
   }
@@ -114,11 +131,22 @@ export class ProvisionRunner extends DurableObject<Env> {
       fetcher,
       prior,
     };
+    // Stamp step start (only on the first attempt — retries reuse the same
+    // startedAt so wall-clock duration covers all attempts honestly).
+    const timings = state.stepTimings ?? {};
+    if (!timings[step]?.startedAt) {
+      timings[step] = { ...(timings[step] ?? {}), startedAt: Date.now() };
+      await this.ctx.storage.put(STATE_KEY, { ...state, stepTimings: timings });
+    }
     try {
       const result: unknown = await STEP_FNS[step](ctx);
       await this.ctx.storage.put(stepKey(step), result);
-      log.info('step_ok');
-      await this.advance(state);
+      // Stamp finishedAt and persist.
+      timings[step] = { ...(timings[step] ?? {}), finishedAt: Date.now() };
+      const latest = (await this.ctx.storage.get<ProvisionRunnerState>(STATE_KEY)) ?? state;
+      await this.ctx.storage.put(STATE_KEY, { ...latest, stepTimings: timings });
+      log.info('step_ok', { ms: timings[step]!.finishedAt! - (timings[step]!.startedAt ?? Date.now()) });
+      await this.advance({ ...latest, stepTimings: timings });
     } catch (e) {
       await this.handleStepError(state, step, e, log);
     }
