@@ -29,6 +29,7 @@ import {
   synthesizeWorker,
 } from '../../lib/static-site/synth.ts';
 import { upsertStickyComment } from '../../lib/github/comments.ts';
+import { reviewBundle } from '../../lib/ai/bundle-review.ts';
 
 export interface StepContext {
   env: Env;
@@ -103,6 +104,8 @@ export interface RouteAndCommentResult {
   prCommentCreated?: boolean;
   /** Set when the GitHub call failed. The provision still succeeds. */
   prCommentSkippedReason?: string;
+  /** True if a Claude bundle review was generated and embedded in the comment. */
+  aiReviewed?: boolean;
 }
 
 const FALLBACK_WRANGLER: CustomerWranglerSummary = {
@@ -139,6 +142,29 @@ export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> =>
     bundleR2Key: `bundles/${ctx.scriptName}.zip`,
     mode: 'fallback',
   };
+
+  // Smart-redeploy short-circuit: if a prior provision against the same
+  // headSha already succeeded, the bundle is byte-identical. Skip the GH
+  // round-trip + synth and reuse the cached source. This makes
+  // doc-only PR updates and webhook replays effectively free.
+  const cacheKey = `bundle-cache:${ctx.params.repoFullName}@${ctx.params.headSha}`;
+  const cached = await ctx.env.CACHE.get(cacheKey, 'json') as
+    | { mode: 'static' | 'fallback'; staticBundleSource?: string; staticSynth?: StaticSynthSummary }
+    | null;
+  if (cached) {
+    ctx.log.info('load_config_cache_hit', { headSha: ctx.params.headSha });
+    if (cached.mode === 'static' && cached.staticBundleSource) {
+      const result: LoadConfigResult = {
+        wrangler: { ...FALLBACK_WRANGLER, main_module: 'worker.js' },
+        bundleR2Key: `bundles/${ctx.scriptName}.zip`,
+        mode: 'static',
+        staticBundleSource: cached.staticBundleSource,
+      };
+      if (cached.staticSynth) result.staticSynth = cached.staticSynth;
+      return result;
+    }
+    return fallbackResult;
+  }
 
   // GitHub failures here (bad/missing App private key, repo deleted, GH
   // outage) shouldn't leave the PR stuck — degrade to the placeholder
@@ -184,7 +210,7 @@ export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> =>
     warnings_count: synth.warnings.length,
   });
 
-  return {
+  const finalResult: LoadConfigResult = {
     wrangler: { ...FALLBACK_WRANGLER, main_module: 'worker.js' },
     bundleR2Key: `bundles/${ctx.scriptName}.zip`,
     mode: 'static',
@@ -195,6 +221,16 @@ export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> =>
       warnings: synth.warnings,
     },
   };
+  // Cache for smart-redeploy. 24h TTL — long enough to cover doc-only PR
+  // updates and webhook replays, short enough that stale Worker source
+  // never lingers across major refactors that happen to keep the same SHA
+  // (impossible in practice, but cheap insurance).
+  await ctx.env.CACHE.put(cacheKey, JSON.stringify({
+    mode: finalResult.mode,
+    staticBundleSource: finalResult.staticBundleSource,
+    staticSynth: finalResult.staticSynth,
+  }), { expirationTtl: 86400 });
+  return finalResult;
 };
 
 const cfClientFromCtx = (ctx: StepContext): CFClient =>
@@ -209,14 +245,56 @@ const cfClientFromCtx = (ctx: StepContext): CFClient =>
 export const provisionResources = async (ctx: StepContext): Promise<ProvisionResourcesResult> => {
   const client = cfClientFromCtx(ctx);
   ctx.log.info('provision_resources', { script: ctx.scriptName });
-  const [d1, kv, queue] = await Promise.all([
-    cfD1.createDatabase(client, `${ctx.scriptName}-db`),
-    cfKv.createNamespace(client, `${ctx.scriptName}-kv`),
-    cfQueues.createQueue(client, `${ctx.scriptName}-q`),
+  // Inlined idempotent provisioning — bypass the cf-lib findOrCreate wrappers
+  // so we can log exactly what's happening at each step. CF returns
+  // wildly different "already exists" shapes per resource type (D1: 400+7502,
+  // KV: 400+10014, Queue: 409+11009), so we just LIST first and only create
+  // if not present. Names are deterministic per PR.
+  const d1Name = `${ctx.scriptName}-db`;
+  const kvTitle = `${ctx.scriptName}-kv`;
+  const queueName = `${ctx.scriptName}-q`;
+
+  const readListBody = async (path: string, label: string): Promise<unknown[] | null> => {
+    const r = await client.raw({ method: 'GET', path });
+    if (!r.ok) { ctx.log.warn('list_failed', { label, error: r.error.message }); return null; }
+    try {
+      const text = await r.value.text();
+      const data = JSON.parse(text) as { result?: unknown };
+      return Array.isArray(data.result) ? data.result : null;
+    } catch (e) { ctx.log.warn('list_parse_failed', { label, error: String(e) }); return null; }
+  };
+
+  const [d1List, kvList, queueList] = await Promise.all([
+    readListBody(`/d1/database?name=${encodeURIComponent(d1Name)}&per_page=100`, 'd1'),
+    readListBody('/storage/kv/namespaces?per_page=100', 'kv'),
+    readListBody('/queues?per_page=100', 'queues'),
   ]);
-  if (!d1.ok) throw d1.error;
-  if (!kv.ok) throw kv.error;
-  if (!queue.ok) throw queue.error;
+
+  const existingD1 = (d1List as Array<{ uuid?: string; name?: string }> | null)?.find((d) => d.name === d1Name);
+  const existingKv = (kvList as Array<{ id?: string; title?: string }> | null)?.find((n) => n.title === kvTitle);
+  const existingQueue = (queueList as Array<{ queue_id?: string; queue_name?: string }> | null)?.find((q) => q.queue_name === queueName);
+
+  ctx.log.info('provision_resources_lookup', {
+    d1_listed: d1List?.length ?? -1,
+    kv_listed: kvList?.length ?? -1,
+    queue_listed: queueList?.length ?? -1,
+    d1_existing: !!existingD1,
+    kv_existing: !!existingKv,
+    queue_existing: !!existingQueue,
+  });
+
+  const d1 = existingD1?.uuid && existingD1.name
+    ? { ok: true as const, value: { uuid: existingD1.uuid, name: existingD1.name } }
+    : await cfD1.createDatabase(client, d1Name);
+  const kv = existingKv?.id && existingKv.title
+    ? { ok: true as const, value: { id: existingKv.id, title: existingKv.title } }
+    : await cfKv.createNamespace(client, kvTitle);
+  const queue = existingQueue?.queue_id && existingQueue.queue_name
+    ? { ok: true as const, value: { queue_id: existingQueue.queue_id, queue_name: existingQueue.queue_name } }
+    : await cfQueues.createQueue(client, queueName);
+  if (!d1.ok) { ctx.log.error('provision_d1_failed', { msg: d1.error.message }); throw d1.error; }
+  if (!kv.ok) { ctx.log.error('provision_kv_failed', { msg: kv.error.message }); throw kv.error; }
+  if (!queue.ok) { ctx.log.error('provision_queue_failed', { msg: queue.error.message }); throw queue.error; }
 
   const result: ProvisionResourcesResult = {
     d1: { binding: 'DB', database_id: d1.value.uuid, database_name: d1.value.name },
@@ -347,26 +425,60 @@ export const uploadScript = async (ctx: StepContext): Promise<UploadScriptResult
   throw new NonRetryableError('E_CF_API', 'upload_script: propagation_exhausted');
 };
 
+interface LiveProbe { status: number; ms: number; bytes: number; ok: boolean }
+
+/**
+ * Fetch the bare workers.dev URL to confirm the preview is actually serving
+ * traffic (not just that ROUTES KV got written). Cheap, gives reviewers an
+ * at-a-glance "is this preview up right now?" signal.
+ */
+const probeLivePreview = async (ctx: StepContext): Promise<LiveProbe | null> => {
+  // Skip the dispatcher 302 — talk straight to the user worker.
+  const url = `https://${ctx.scriptName}.${ctx.env.CF_WORKERS_SUBDOMAIN}/`;
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url, { redirect: 'manual' });
+    const buf = await r.arrayBuffer();
+    return { status: r.status, ms: Date.now() - t0, bytes: buf.byteLength, ok: r.status >= 200 && r.status < 400 };
+  } catch {
+    return null;
+  }
+};
+
 const buildPreviewCommentBody = (
   ctx: StepContext,
   config: LoadConfigResult,
+  aiReview: string | null,
+  probe: LiveProbe | null,
 ): string => {
   const dashUrl = `https://raft-control.${ctx.env.CF_WORKERS_SUBDOMAIN}/dashboard/pr/${encodeURIComponent(ctx.prEnvId)}`;
   const bundleLine = config.mode === 'static' && config.staticSynth
     ? `**Bundle:** \`static-synth\` · ${config.staticSynth.fileCount} file${config.staticSynth.fileCount === 1 ? '' : 's'} · ${(config.staticSynth.totalBytes / 1024).toFixed(1)} KB`
     : `**Bundle:** \`placeholder\` (no \`index.html\` found and customer bundle not yet uploaded)`;
-  return [
+  const lines = [
     `### 🛟 Raft preview ready`,
     ``,
     `**Preview:** ${ctx.previewHostname}/`,
     ``,
     bundleLine,
     `**Scope:** \`${ctx.scope}\` · **Worker:** \`${ctx.scriptName}\``,
+  ];
+  if (probe) {
+    const dot = probe.ok ? '🟢' : '🔴';
+    lines.push(
+      `**Live probe:** ${dot} HTTP ${probe.status} · ${probe.ms} ms · ${(probe.bytes / 1024).toFixed(1)} KB`,
+    );
+  }
+  if (aiReview) {
+    lines.push('', '<details><summary>🤖 <b>AI review</b> (Claude Haiku)</summary>', '', aiReview, '</details>');
+  }
+  lines.push(
     ``,
     `[Open in dashboard ↗](${dashUrl})`,
     ``,
     `<sub>Per-PR isolated environment provisioned by [Raft](https://github.com/Adi-gitX/Rift) on Cloudflare Workers free tier. Auto-torn-down on PR close.</sub>`,
-  ].join('\n');
+  );
+  return lines.join('\n');
 };
 
 export const routeAndComment = async (ctx: StepContext): Promise<RouteAndCommentResult> => {
@@ -398,7 +510,38 @@ export const routeAndComment = async (ctx: StepContext): Promise<RouteAndComment
       { appId: ctx.env.GITHUB_APP_ID, privateKeyPem: ctx.env.GITHUB_APP_PRIVATE_KEY },
       ctx.params.installationId,
     );
-    const body = buildPreviewCommentBody(ctx, config);
+
+    // Optional AI review (Claude Haiku). Only fires for static-synth previews
+    // — placeholder bundles aren't worth reviewing. Skip silently if the
+    // ANTHROPIC_API_KEY secret isn't configured.
+    let aiReview: string | null = null;
+    if (ctx.env.ANTHROPIC_API_KEY && config.mode === 'static' && config.staticBundleSource) {
+      const t0 = Date.now();
+      const review = await reviewBundle(ctx.env.ANTHROPIC_API_KEY, {
+        bundleSource: config.staticBundleSource,
+        prNumber: ctx.params.prNumber,
+        repoFullName: ctx.params.repoFullName,
+      });
+      if (review) {
+        aiReview = review.markdown;
+        ctx.log.info('ai_review_ok', {
+          input_tokens: review.usage.inputTokens,
+          output_tokens: review.usage.outputTokens,
+          ms: Date.now() - t0,
+        });
+      } else {
+        ctx.log.warn('ai_review_failed', { ms: Date.now() - t0 });
+      }
+    }
+
+    // Live probe runs in parallel with the GitHub install-token mint (already
+    // done above), so it adds at most ~200ms of perceivable wall-clock time.
+    const probe = await probeLivePreview(ctx);
+    if (probe) {
+      ctx.log.info('preview_probe', { status: probe.status, ms: probe.ms, bytes: probe.bytes });
+    }
+
+    const body = buildPreviewCommentBody(ctx, config, aiReview, probe);
     const upsert = await upsertStickyComment({
       token,
       ownerRepo: ctx.params.repoFullName,
@@ -409,7 +552,8 @@ export const routeAndComment = async (ctx: StepContext): Promise<RouteAndComment
     await setResourceHandles(ctx.env.DB, ctx.prEnvId, { prCommentId: upsert.commentId });
     result.prCommentId = upsert.commentId;
     result.prCommentCreated = upsert.created;
-    ctx.log.info('pr_comment_upserted', { comment_id: upsert.commentId, created: upsert.created });
+    if (aiReview) result.aiReviewed = true;
+    ctx.log.info('pr_comment_upserted', { comment_id: upsert.commentId, created: upsert.created, ai: !!aiReview });
   } catch (e) {
     ctx.log.warn('pr_comment_skipped', { error: String(e) });
     result.prCommentSkippedReason = String(e);
