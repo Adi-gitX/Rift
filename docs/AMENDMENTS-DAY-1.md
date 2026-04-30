@@ -169,3 +169,153 @@ Workflow `step.do` is exception-based (it retries on throw). Returning
 
 *End of Day-1 amendments. Each is implemented in the v1 codebase and
 referenced in inline `// PRD amendment AX` comments.*
+
+---
+
+# Day-2 changes (v0.2.0)
+
+These changes ship the customer-Worker bundle path (PRD §9.4 Track A) and
+add several production-readiness fixes. Every change is in code; this
+section is the reference for what diverged from the Day-1 design.
+
+## D1 — Customer-Worker bundle ingestion (Track A)
+**Affected**: PRD §9.4 (build-bundle), §9.7 (upload-to-wfp), §9.9 (sync flow).
+
+The PRD called for the customer's GH Action to POST a zip to a
+Raft-controlled URL, with the control Worker storing the zip in R2.
+Implementation:
+
+- Switched from zip to JSON payload to avoid a zip-parser dependency
+  inside the worker. Customer's GH Action runs a tiny Node script that
+  base64-encodes each module from `wrangler deploy --dry-run --outdir=dist`
+  and POSTs `{wrangler, modules: [{name, content_b64, type}]}` to
+  `/api/v1/bundles/upload`.
+- Storage moved from R2 to `BUNDLES_KV` keyed by `bundle:{installation}:{repo}:{headSha}`.
+  Cap is 24 MB (KV value limit); typical bundles are well under 1 MB.
+- New `await-bundle` step inserted into `STEP_ORDER` between `load-config`
+  and `provision-resources`. Polls `BUNDLES_KV` every 2s up to a 5-min
+  timeout. No-op for `static` and `fallback` modes — returns immediately.
+- `loadConfig` detection precedence: `wrangler.{jsonc,json,toml}` →
+  `customer-bundle`; else `index.html` under root/public/dist/build/site
+  → `static-synth`; else `fallback`.
+- `rewriteBundle` now consumes the customer's modules from KV and threads
+  the customer's `main_module` through to `uploadScript`. (Bug found
+  during verification: `uploadScript` was reading `config.wrangler.main_module`
+  which was always `worker.js`, while the customer's bundle had
+  `index.js`. CF returned 400 "No such module: worker.js" until the fix.)
+
+## D2 — D1 base-DB fork (PRD §9.3, fork-base-db)
+**Affected**: PRD §9.3 (prepare-base-export), §9.5 (provision-resources).
+
+The PRD bundled the export+import flow into provision-resources. Split
+into a dedicated `fork-base-db` step (between `provision-resources` and
+`rewrite-bundle`) so failures degrade cleanly rather than failing the
+provision. Source preference:
+
+1. `repo.baseD1Id` (per-repo configuration; not yet exposed via UI)
+2. `RAFT_DEMO_BASE_D1_ID` env (demo-mode default)
+3. Skip → empty per-PR DB
+
+Step is **NOT** cleared on `synchronize`/redeploy: re-importing on top of
+an already-seeded DB would duplicate rows / conflict on schema migrations.
+Treated as one-shot per PR-env, like resource creation.
+
+## D3 — `provision-resources` made list-then-create idempotent
+**Affected**: PRD §9.5.
+
+CF's create endpoints for D1 / KV / Queue all reject "name already
+exists" with different status codes (D1: 400+7502, KV: 400+10014, Queue:
+409+11009). On redeploy / replay against the same PR, the deterministic
+resource names collide. Resolution: list-by-name first via `client.raw`,
+construct the result from the existing entry; only POST create when
+nothing matches. Result type is constructed inline to avoid the schema-
+strictness issues that bit the original `findOrCreate` attempt.
+
+## D4 — Per-step start/finish timestamps
+**Affected**: PRD §7 (DO designs).
+
+`ProvisionRunnerState` now carries `stepTimings: Partial<Record<step,
+{startedAt, finishedAt}>>`. `runStep` stamps `startedAt` on first attempt
+(retries reuse it so wall-clock is honest), then `finishedAt` after the
+result persists. Dashboard latency chart reads from these directly;
+falls back to "approximate equal slices" only for legacy snapshots.
+
+## D5 — Synchronize race + step-cache reset
+**Affected**: PRD §7.2.
+
+DO runtime serialises everything, so the race is just stale cached step
+results. `start()` now clears `step:{load-config, await-bundle,
+rewrite-bundle, upload-script, route-and-comment}` and resets
+`stepTimings: {}` on every fresh start. KEEPS `step:provision-resources`
+and `step:fork-base-db` (re-running them would 4xx or duplicate data).
+
+## D6 — Webhook deduplication on `delivery_id`
+**Affected**: PRD §8.
+
+GitHub retries deliveries on timeout. Without dedup, `pull_request.opened`
+could double-provision. Added a 24h KV cache on `webhook-dedup:{deliveryId}`.
+Replays return 200 + `{accepted: 0, dedup: true}` and never re-enqueue.
+Stash happens before enqueue so a flapping retry never sees a window.
+
+## D7 — Per-repo quota guard
+**Affected**: new (PRD didn't enforce this).
+
+`RepoCoordinator.beginProvision` checks live D1 + Queue counts (which cap
+at 10 each on free tier) and refuses to create a fresh `pending` env
+that would push past 9/10. Emits `pr_env.quota_blocked` audit row.
+Synchronize on existing envs is allowed (already counted).
+
+## D8 — Per-scope HMAC token gates static-synth previews
+**Affected**: PRD §12 (security model).
+
+The PRD assumed Cloudflare Access for preview gating (paid). Free-tier
+substitute: the dispatcher computes
+`base64url-truncated HMAC-SHA256("raft-preview:{scope}",
+INTERNAL_DISPATCH_SECRET)` and appends it to the 302 as `?raft_t=` plus
+`Set-Cookie: raft_t=...`. The synthesised static worker checks the
+query param OR the cookie; rejects 401 otherwise. Bare `*.workers.dev`
+URLs stop being publicly walkable.
+
+For customer-bundle mode this is opt-in (the customer's worker would
+need to verify the token); the bundle-rewriter does not auto-inject.
+
+## D9 — Operator alerting from cron
+**Affected**: PRD §17.
+
+New `runAlertChecks` runs alongside the daily sweep. POSTs to
+`RAFT_ALERT_WEBHOOK` (Slack-incoming-webhook compatible) when:
+
+- Any free-tier slot exceeds 80% (workers/D1/KV/queues; control-plane
+  overhead included)
+- Any PR env has been in `pending`/`provisioning`/`updating` with
+  `last_activity_at` older than 5 min (stuck runner)
+
+No-op if the env var is unset.
+
+## D10 — Removed: AI bundle review (was prototyped, dropped before publish)
+**Affected**: was new (PRD didn't include).
+
+A prototype attached an LLM-generated 3-bullet review to each sticky PR
+comment, gated by an optional API key. Removed before publish to keep
+the surface area focused on the deterministic provisioning + lifecycle
+machinery. The PR comment now ships preview URL, bundle source chip,
+and a live HTTP probe — no AI.
+
+---
+
+## Deferred to v1.5 (honest)
+
+- **Per-installation Cloudflare API tokens**: the schema seed exists
+  (installations table has fields) but runtime wiring is not done.
+  Demo uses a single shared `CF_API_TOKEN`. Production multi-tenancy
+  needs encrypted storage in D1 (free path) or Secrets Store (paid).
+- **Real log streaming**: `LogTail` DO + `raft-tail` Worker are wired,
+  but binding the tail consumer to per-PR scripts requires Workers Paid.
+  Workaround in PR detail: deep-link to the script's Workers Logs page
+  in the CF dashboard.
+- **`fork-base-db` happy-path unit test**: works in production; only the
+  degrade path is covered by integration tests. A green-path test would
+  need to mock the full export → init → upload → ingest → poll flow
+  inside vitest-pool-workers.
+
+*End of Day-2 amendments.*
