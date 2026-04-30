@@ -38,11 +38,13 @@ const stepKey = (name: string): string => `step:${name}`;
 
 export class ProvisionRunner extends DurableObject<Env> {
   async start(state: ProvisionRunnerState): Promise<void> {
-    // Drop any cached step results from a prior provision so this run
-    // re-executes every step against the new headSha / config. Without
-    // this, `pull_request.synchronize` and manual /redeploy would short-
-    // circuit through the cached results and serve stale code.
-    for (const name of STEP_ORDER) {
+    // Drop cached results for SHA-dependent steps so this run re-executes
+    // them against the new headSha / config. KEEP `provision-resources`
+    // cached — D1/KV/Queue have deterministic names; re-creating them on
+    // every redeploy would 400 with "name already exists". The resources
+    // are designed to be reused across redeploys of the same PR.
+    const SHA_DEPENDENT_STEPS = ['load-config', 'rewrite-bundle', 'upload-script', 'route-and-comment'] as const;
+    for (const name of SHA_DEPENDENT_STEPS) {
       await this.ctx.storage.delete(stepKey(name));
     }
     const fresh: ProvisionRunnerState = { ...state, status: 'running', startedAt: Date.now() };
