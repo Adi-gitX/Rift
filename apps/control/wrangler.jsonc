@@ -23,6 +23,12 @@
     "GITHUB_APP_ID": "3540573",
     "GITHUB_APP_CLIENT_ID": "Iv23lirXMcaWBVNTVeIn",
     "GITHUB_APP_NAME": "rift-aditya",
+    // Demo-mode base D1 to fork into every per-PR DB. When absent the
+    // fork-base-db step no-ops cleanly (`source: 'skipped', reason:
+    // 'no-base-d1'`) — preferable to having an unreachable source surface
+    // as `export_failed` on every PR. Re-set when you have a source DB
+    // your CF API token can actually export from.
+    // "RAFT_DEMO_BASE_D1_ID": "<source-d1-uuid-here>",
     "CF_OWN_ACCOUNT_ID": "5aabf3b807d9050ab805de40e0280ef3",
     "ACCESS_TEAM_DOMAIN": "N/A",
     "ACCESS_AUD": "N/A"
