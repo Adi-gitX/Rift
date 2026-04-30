@@ -185,6 +185,27 @@ apiRoutes.post('/api/v1/repos/:repoId/rotate-upload-token', async (c) => {
   return c.json(apiOk({ upload_token: token, repo_id: repoId }, c.var.requestId));
 });
 
+// JSON bundle payload schema. The customer's GH Action posts this:
+//   {
+//     wrangler: {main_module, compatibility_date, compatibility_flags?, bindings?},
+//     modules: [{name, content_b64, type?}, ...],
+//   }
+// Modules are base64-encoded so the payload is one self-contained JSON blob —
+// no zip parser needed inside the worker.
+const bundleUploadSchema = z.object({
+  wrangler: z.object({
+    main_module: z.string().optional(),
+    compatibility_date: z.string().optional(),
+    compatibility_flags: z.array(z.string()).optional(),
+    bindings: z.array(z.object({}).passthrough()).optional(),
+  }).passthrough().default({}),
+  modules: z.array(z.object({
+    name: z.string().min(1).max(256),
+    content_b64: z.string().min(1),
+    type: z.string().optional(),
+  })).min(1).max(50),
+});
+
 apiRoutes.post('/api/v1/bundles/upload', async (c) => {
   const auth = c.req.header('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : '';
@@ -197,20 +218,45 @@ apiRoutes.post('/api/v1/bundles/upload', async (c) => {
   if (!repo.ok || !repo.value) return c.json(apiErr('E_NOT_FOUND', 'repo not found', c.var.requestId), 404);
   const ok = await verifyUploadToken(token, repo.value.uploadTokenHash);
   if (!ok) return c.json(apiErr('E_AUTH', 'invalid upload token', c.var.requestId), 401);
-  // Per-repo upload rate limit: 30/min.
   const verdict = await checkRateLimit(c.env.CACHE, `up:${repoId}`, 30, 60);
   if (!verdict.allowed) {
     return c.json(apiErr('E_RATE_LIMIT', '30 uploads/min exceeded', c.var.requestId), 429);
   }
-  const bytes = await c.req.arrayBuffer();
-  if (bytes.byteLength > 24 * 1024 * 1024) {
+
+  // Parse + validate JSON payload.
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return c.json(apiErr('E_VALIDATION', 'invalid JSON', c.var.requestId), 400);
+  }
+  const parsed = bundleUploadSchema.safeParse(raw);
+  if (!parsed.success) {
+    return c.json(apiErr('E_VALIDATION', `bad payload: ${parsed.error.message}`, c.var.requestId), 400);
+  }
+
+  // Repack with timestamps so the runner / dashboard can show ingestion ts.
+  const payload = {
+    ...parsed.data,
+    uploadedAt: Math.floor(Date.now() / 1000),
+    bytes: parsed.data.modules.reduce((s, m) => s + m.content_b64.length, 0),
+  };
+  const json = JSON.stringify(payload);
+  if (json.length > 24 * 1024 * 1024) {
     return c.json(apiErr('E_VALIDATION', 'bundle exceeds 24MB KV cap', c.var.requestId), 413);
   }
+
   const id = ulid();
-  const key = `bundle:${repoId}:${headSha}`;
-  await c.env.BUNDLES_KV.put(key, bytes, {
-    metadata: { id, headSha, repoId, size: bytes.byteLength },
+  // KV key MUST mirror runner/provision/steps.ts `bundleKvKey()`.
+  const key = `bundle:${repo.value.installationId}:${repo.value.fullName}:${headSha}`;
+  await c.env.BUNDLES_KV.put(key, json, {
+    metadata: { id, headSha, repoId, modules: parsed.data.modules.length, bytes: json.length },
     expirationTtl: 14 * 86400,
   });
-  return c.json(apiOk({ id, key, bytes: bytes.byteLength }, c.var.requestId));
+  return c.json(apiOk({
+    id,
+    key,
+    modules: parsed.data.modules.length,
+    bytes: json.length,
+  }, c.var.requestId));
 });
