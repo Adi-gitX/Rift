@@ -147,10 +147,27 @@ export const RaftSettings = () => {
         </section>
 
         <section>
-          <h2 className="mb-3 text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Installations</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Installations</h2>
+            {me?.githubApp?.installUrl && (
+              <a
+                href={me.githubApp.installUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-[#ED462D] hover:text-[#ff7a5c] inline-flex items-center gap-1 d-mono"
+              >
+                + Install on another repo ↗
+              </a>
+            )}
+          </div>
           <div className="border border-white/[0.06] rounded">
             {(me?.installations ?? []).length === 0 ? (
-              <div className="px-4 py-5 text-[12.5px] text-white/55">No active installations.</div>
+              <div className="px-4 py-5 text-[12.5px] text-white/55">
+                No active installations.
+                {me?.githubApp?.installUrl && (
+                  <a href={me.githubApp.installUrl} target="_blank" rel="noreferrer" className="ml-2 text-[#ED462D] hover:text-[#ff7a5c]">Install Raft →</a>
+                )}
+              </div>
             ) : (
               (me?.installations ?? []).map((i) => (
                 <div key={i.id} className="grid grid-cols-[minmax(0,1fr)_140px_120px] gap-3 px-4 py-3 border-b border-white/[0.04] last:border-b-0 text-[12.5px]">
