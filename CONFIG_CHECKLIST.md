@@ -1,6 +1,31 @@
 # Raft Configuration Checklist
 
-Every `REPLACE_ME` in the project, with where to source it.
+Every `REPLACE_ME` in the project, with where to source it. Updated for v0.2.0.
+
+## Quick reference: required vs optional
+
+| Variable | Kind | Required? | Used for |
+|---|---|---|---|
+| `CF_OWN_ACCOUNT_ID` | wrangler.vars | required | All CF API calls scoping |
+| `CF_WORKERS_SUBDOMAIN` | wrangler.vars | required | Per-PR Worker URL construction |
+| `CF_API_TOKEN` | wrangler.secret | required | All per-PR provisioning auth |
+| `GITHUB_APP_ID` | wrangler.vars | required | App JWT signing |
+| `GITHUB_APP_NAME` | wrangler.vars | required | Dashboard "Install on a repo" deep-link |
+| `GITHUB_APP_CLIENT_ID` | wrangler.vars | required | App config display |
+| `GITHUB_APP_PRIVATE_KEY` | wrangler.secret | ✅ required (PKCS#8 PEM) | App JWT signing |
+| `GITHUB_WEBHOOK_SECRET` | wrangler.secret | required | HMAC verification of incoming webhooks |
+| `SESSION_SIGNING_KEY` | wrangler.secret | required | Operator session cookie + login |
+| `INTERNAL_DISPATCH_SECRET` | wrangler.secret (both control + dispatcher) | required | Per-scope HMAC token gating previews |
+| `RAFT_BASE_DOMAIN` | wrangler.vars | required | Hostname construction |
+| `RAFT_ENV` | wrangler.vars | required | Logging / alerting tag |
+| `RAFT_ALERT_WEBHOOK` | wrangler.secret | optional | Slack-incoming-webhook URL for cap-near + stuck-runner alerts |
+| `RAFT_DEMO_BASE_D1_ID` | wrangler.vars | optional | D1 source to fork into every per-PR DB when `repo.baseD1Id` is null. Without this, the `fork-base-db` step no-ops and PRs get an empty D1. |
+
+> **PKCS#8 note**: GitHub gives you a PKCS#1 PEM (`-----BEGIN RSA PRIVATE KEY-----`). Web Crypto on Workers needs PKCS#8. Convert before uploading:
+> ```bash
+> openssl pkcs8 -topk8 -in raft-app.private-key.pem -nocrypt -out raft-app-pkcs8.pem
+> cat raft-app-pkcs8.pem | wrangler secret put GITHUB_APP_PRIVATE_KEY
+> ```
 
 ## 1 — Cloudflare account
 
@@ -62,6 +87,23 @@ Generate with:
 ```bash
 node -e "console.log(crypto.randomBytes(32).toString('base64url'))"
 ```
+
+## 4b — Optional integrations
+
+```bash
+# Slack-incoming-webhook URL for operator alerts (free-tier > 80% or stuck runner).
+# Discord works too via the Slack-format adapter.
+pnpm --filter @raft/control exec wrangler secret put RAFT_ALERT_WEBHOOK
+```
+
+Demo-mode D1 fork (no secret — wrangler var):
+
+```jsonc
+// apps/control/wrangler.jsonc — vars block
+"RAFT_DEMO_BASE_D1_ID": "<uuid of a D1 you can export from with the same CF token>"
+```
+
+When set, every per-PR D1 is seeded by exporting this base + importing into the new DB. Skipped cleanly if the source can't be exported (e.g. token lacks D1:Edit, or DB is empty).
 
 ## 5 — Local dev (.dev.vars)
 
