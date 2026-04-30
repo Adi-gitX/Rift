@@ -188,10 +188,13 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
  *   GET unknown extensionless paths → /index.html (SPA fallback)
  *   GET unknown asset paths        → 404
  *
- * Cache-Control: no-store keeps reviewers from caching stale preview pages
- * while their PR is being iterated on.
+ * Auth: when an `expectedToken` is supplied, the worker requires either
+ * `?raft_t=<token>` query param or a `raft_t=<token>` cookie. Without
+ * that the bare *.workers.dev URL returns 401 — only requests proxied
+ * through raft-dispatcher (which appends the token + sets the cookie)
+ * can see the content.
  */
-export const synthesizeWorker = (result: SynthResult): string => {
+export const synthesizeWorker = (result: SynthResult, opts?: { expectedToken?: string }): string => {
   const filesObj: Record<string, { ct: string; b: string; bin: boolean }> = {};
   for (const f of result.files) {
     if (f.bytes) {
@@ -201,13 +204,32 @@ export const synthesizeWorker = (result: SynthResult): string => {
     }
   }
   const fileMapJson = JSON.stringify(filesObj);
+  const expectedToken = opts?.expectedToken ?? '';
   return `// Synthesized by Raft for static-mode preview.
 // Files inlined: ${result.files.length} · total bytes: ${result.totalBytes}
 const FILES = ${fileMapJson};
+const EXPECTED_TOKEN = ${JSON.stringify(expectedToken)};
 const decode = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+const cookieValue = (header, name) => {
+  if (!header) return '';
+  for (const part of header.split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return v.join('=');
+  }
+  return '';
+};
 export default {
   async fetch(req) {
     const url = new URL(req.url);
+    if (EXPECTED_TOKEN) {
+      const t = url.searchParams.get('raft_t') || cookieValue(req.headers.get('cookie'), 'raft_t');
+      if (t !== EXPECTED_TOKEN) {
+        return new Response('Forbidden — open this preview through raft-dispatcher.', {
+          status: 401,
+          headers: { 'content-type': 'text/plain' },
+        });
+      }
+    }
     let p = url.pathname || '/';
     if (p === '/' || p === '') p = '/index.html';
     let f = FILES[p];
