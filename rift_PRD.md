@@ -546,17 +546,38 @@ type ProvisionParams = {
 * Poll until `status === "complete"`. Cloudflare returns a `signed_url`; we `fetch` it and stream to R2 at `bases/{repo_id}/{baseSha}.sql`.
 * Release export-lock.
 
-### 9.4 Step 3 — `build-bundle`
+### 9.4 Step 3 — `await-bundle` ✅ SHIPPED in v0.2.0
 
-**v1 simplification.** We do not run user code in v1. We require the customer to commit a tag-prefix that triggers their existing CI to upload `dist/worker.js` + `dist/wrangler.jsonc` to a Raft-controlled URL with a per-repo upload token. Concretely:
+**Implementation note**: see Day-2 amendment D1. Diverged from the original
+design: payload is JSON not zip (no parser dep in worker), storage is
+`BUNDLES_KV` not R2 (free tier), and the wait is via DO-alarm polling
+not a D1 polling loop.
 
-* The customer adds one GitHub Action job `raft-bundle.yml` (we provide it). It runs `wrangler deploy --dry-run --outdir=dist`, zips `dist/`, and POSTs to `https://api.raft.dev/api/v1/bundles/upload` with `Authorization: Bearer <repo upload token>`.
-* The control Worker stores the zip in R2 at `bundles/{repo_id}/{headSha}.zip`.
-* This step waits on the upload (with a 5-minute timeout) by polling `deployments` table in D1.
+* Customer adds one GitHub Action job `raft-bundle.yml` (provided on the
+  dashboard Settings page). It runs `wrangler deploy --dry-run
+  --outdir=dist`, base64-encodes each module, and POSTs JSON
+  `{wrangler, modules: [{name, content_b64, type}]}` to
+  `https://<your-control>.workers.dev/api/v1/bundles/upload` with
+  `Authorization: Bearer <repo upload token>` + headers
+  `X-Raft-Repo-Id` + `X-Raft-Head-Sha`.
+* The control Worker validates with Zod, then stores the JSON in
+  `BUNDLES_KV` at `bundle:{installation}:{repo}:{headSha}`.
+* The new `await-bundle` provisioning step polls `BUNDLES_KV` every 2s up
+  to a 5-min cap. No-op for `static-synth` and `fallback` modes —
+  returns immediately.
 
-**Why this design.** Running arbitrary `wrangler` builds inside Raft's account would require Containers + Docker images per language toolchain — out of scope for v1 and a security headache.
+**Why JSON, not zip.** Avoids pulling a zip-parser into the worker (size
++ vulnerability surface). Customer's GH Action does the encoding via a
+~10-line node inline script; the worker just decodes per-module on
+upload-script.
 
-**v2 plan.** Run builds inside Cloudflare Containers with a sandboxed build image.
+**Why KV, not R2.** Free-tier R2 has no API on Workers Free. KV value cap
+is 24 MB which is comfortably above typical Worker bundles (most under 1
+MB after `wrangler deploy --dry-run`). Production / paid path can swap
+to R2 by changing only the storage helper.
+
+**v2 plan.** Run builds inside Cloudflare Containers with a sandboxed
+build image so customers don't need to add a workflow at all.
 
 ### 9.5 Step 4 — `provision-resources`
 
