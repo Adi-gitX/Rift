@@ -23,13 +23,13 @@ import { type Logger } from '../../lib/logger.ts';
 import { setResourceHandles } from '../../lib/db/prEnvironments.ts';
 import { getInstallationToken } from '../../lib/github/app.ts';
 import { getRepoTree } from '../../lib/github/contents.ts';
+import { getRepo, repoIdOf } from '../../lib/db/repos.ts';
 import {
   detectStatic,
   fetchAndInlineFiles,
   synthesizeWorker,
 } from '../../lib/static-site/synth.ts';
 import { upsertStickyComment } from '../../lib/github/comments.ts';
-import { reviewBundle } from '../../lib/ai/bundle-review.ts';
 
 export interface StepContext {
   env: Env;
@@ -47,7 +47,7 @@ export interface StepContext {
   propagationDelayMs?: number;
 }
 
-export type LoadConfigMode = 'static' | 'fallback';
+export type LoadConfigMode = 'customer-bundle' | 'static' | 'fallback';
 
 export interface StaticSynthSummary {
   fileCount: number;
@@ -87,6 +87,12 @@ export interface RewriteBundleResult {
   bindings: unknown[];
   modulesCount: number;
   warnings: string[];
+  /** The actual main_module name in the rewritten bundle. For customer-bundle
+   *  mode this is the customer's main module (e.g. "index.js"); for
+   *  static / fallback this is what the synth template emits. */
+  mainModule: string;
+  compatibilityDate: string;
+  compatibilityFlags?: string[];
 }
 
 export interface UploadScriptResult {
@@ -104,8 +110,6 @@ export interface RouteAndCommentResult {
   prCommentCreated?: boolean;
   /** Set when the GitHub call failed. The provision still succeeds. */
   prCommentSkippedReason?: string;
-  /** True if a Claude bundle review was generated and embedded in the comment. */
-  aiReviewed?: boolean;
 }
 
 const FALLBACK_WRANGLER: CustomerWranglerSummary = {
@@ -119,10 +123,34 @@ const FALLBACK_WRANGLER: CustomerWranglerSummary = {
   do_classes_to_shard: [],
 };
 
+/**
+ * Worker uploaded when neither customer-bundle nor static-synth applies.
+ * Returns 503 with an actionable message — does NOT silently serve fake
+ * content. The PR sticky comment also calls this out as a configuration
+ * problem (see buildPreviewCommentBody).
+ */
 const PLACEHOLDER_BUNDLE_SOURCE = `export default {
   async fetch(req, env) {
-    return new Response('hello from raft preview ' + (env.RAFT_PR_SCOPE ?? 'unknown'), {
-      headers: { 'content-type': 'text/plain' },
+    const message = [
+      'Preview environment is not configured for this repository.',
+      '',
+      'To deploy real previews, do one of:',
+      '',
+      '  1. Add a wrangler config (wrangler.jsonc / .json / .toml) and the Raft GitHub Action',
+      '     workflow to upload your built Worker bundle on every PR.',
+      '',
+      '  2. Add an index.html under /, /public, /dist, /build, or /site for static-site',
+      '     deployments (no GitHub Action required).',
+      '',
+      'Scope: ' + (env.RAFT_PR_SCOPE ?? 'unknown'),
+    ].join('\\n');
+    return new Response(message, {
+      status: 503,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-raft-preview': 'unconfigured',
+      },
     });
   },
 };
@@ -149,10 +177,10 @@ export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> =>
   // doc-only PR updates and webhook replays effectively free.
   const cacheKey = `bundle-cache:${ctx.params.repoFullName}@${ctx.params.headSha}`;
   const cached = await ctx.env.CACHE.get(cacheKey, 'json') as
-    | { mode: 'static' | 'fallback'; staticBundleSource?: string; staticSynth?: StaticSynthSummary }
+    | { mode: LoadConfigMode; staticBundleSource?: string; staticSynth?: StaticSynthSummary }
     | null;
   if (cached) {
-    ctx.log.info('load_config_cache_hit', { headSha: ctx.params.headSha });
+    ctx.log.info('load_config_cache_hit', { headSha: ctx.params.headSha, mode: cached.mode });
     if (cached.mode === 'static' && cached.staticBundleSource) {
       const result: LoadConfigResult = {
         wrangler: { ...FALLBACK_WRANGLER, main_module: 'worker.js' },
@@ -162,6 +190,13 @@ export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> =>
       };
       if (cached.staticSynth) result.staticSynth = cached.staticSynth;
       return result;
+    }
+    if (cached.mode === 'customer-bundle') {
+      return {
+        wrangler: { ...FALLBACK_WRANGLER, main_module: 'worker.js' },
+        bundleR2Key: `bundles/${ctx.scriptName}.zip`,
+        mode: 'customer-bundle',
+      };
     }
     return fallbackResult;
   }
@@ -192,6 +227,28 @@ export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> =>
     return fallbackResult;
   }
 
+  // Detection precedence:
+  //   1. wrangler.{jsonc,json,toml} present → customer-bundle (Track A,
+  //      requires the GH Action to upload a built dist/)
+  //   2. index.html under one of STATIC_ROOTS → static-synth (no customer setup)
+  //   3. otherwise → fallback placeholder
+  const hasWranglerConfig = tree.tree.some(
+    (e) => e.type === 'blob' && /^wrangler\.(jsonc|json|toml)$/.test(e.path),
+  );
+  if (hasWranglerConfig) {
+    ctx.log.info('load_config_customer_bundle_detected');
+    const customerResult: LoadConfigResult = {
+      wrangler: { ...FALLBACK_WRANGLER, main_module: 'worker.js' },
+      bundleR2Key: `bundles/${ctx.scriptName}.zip`,
+      mode: 'customer-bundle',
+    };
+    // Cache the mode decision so re-runs against the same SHA short-circuit.
+    await ctx.env.CACHE.put(cacheKey, JSON.stringify({ mode: 'customer-bundle' }), {
+      expirationTtl: 86400,
+    });
+    return customerResult;
+  }
+
   const detection = detectStatic(tree);
   if (!detection.isStatic) {
     ctx.log.info('load_config_no_static_match', { tree_truncated: tree.truncated });
@@ -203,7 +260,11 @@ export const loadConfig = async (ctx: StepContext): Promise<LoadConfigResult> =>
     ctx.log.warn('load_config_static_zero_files', { warnings: synth.warnings });
     return fallbackResult;
   }
-  const source = synthesizeWorker(synth);
+  // Compute the per-scope auth token. Mirrors raft-dispatcher's signScope:
+  // base64url-truncated HMAC-SHA256 of "raft-preview:{scope}". The
+  // synthesized worker checks ?raft_t= or the raft_t cookie.
+  const expectedToken = await signScopeForSynth(ctx.scope, ctx.env.INTERNAL_DISPATCH_SECRET);
+  const source = synthesizeWorker(synth, { expectedToken });
   ctx.log.info('load_config_static_synth_ok', {
     files: synth.files.length,
     bytes: synth.totalBytes,
@@ -242,6 +303,138 @@ const cfClientFromCtx = (ctx: StepContext): CFClient =>
     baseDelayMs: 50,
   });
 
+/**
+ * Compute the same per-scope HMAC token raft-dispatcher emits, so the
+ * synthesized worker can verify requests came through the dispatcher.
+ * Keep this function byte-for-byte aligned with apps/dispatcher/src/index.ts:signScope.
+ */
+const signScopeForSynth = async (scope: string, secret: string): Promise<string> => {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`raft-preview:${scope}`)));
+  let s = '';
+  for (let i = 0; i < 16; i++) s += String.fromCharCode(sig[i]!);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+// ── Track A: customer-Worker bundle ingestion ──────────────────────────────
+
+export interface AwaitBundleResult {
+  /** Modes that need a customer bundle from the GH-Action upload. */
+  source: 'customer-bundle' | 'static-synth' | 'placeholder';
+  /** Set when source==='customer-bundle'; the BUNDLES_KV key carrying the zip. */
+  bundleKey?: string;
+  /** Set when source==='customer-bundle'; bytes of the uploaded archive. */
+  bundleBytes?: number;
+  /** SHA-256 of the bundle bytes (hex). Used for smart-redeploy short-circuit. */
+  bundleEtag?: string;
+  /** Wall-clock waiting time, ms — surfaced in the dashboard. */
+  waitedMs: number;
+}
+
+/**
+ * KV key for the customer-uploaded bundle. Mirrors the upload endpoint in
+ * routes/api.ts which uses `bundle:{repoId}:{headSha}` where repoId is the
+ * fully-qualified `{installationId}:{repoFullName}`. Keep these identical or
+ * the runner won't find what the GH Action just pushed.
+ */
+export const bundleKvKey = (installationId: string, repoFullName: string, headSha: string): string =>
+  `bundle:${installationId}:${repoFullName}:${headSha}`;
+
+export interface UploadedBundlePayload {
+  wrangler: {
+    main_module?: string;
+    compatibility_date?: string;
+    compatibility_flags?: string[];
+    bindings?: unknown[];
+  };
+  modules: Array<{
+    name: string;
+    /** Base64-encoded module bytes. */
+    content_b64: string;
+    type?: string;
+  }>;
+  uploadedAt?: number;
+  bytes?: number;
+}
+
+const AWAIT_BUNDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const AWAIT_BUNDLE_POLL_MS = 2000;
+
+/**
+ * Wait for the customer's GH Action to upload the bundle. The upload
+ * endpoint also wakes the PrEnvironment DO directly (push semantics), but
+ * we keep this poll loop as the durable fallback in case the wake-up
+ * misses (DO storage is the source of truth).
+ *
+ * Static / fallback modes return immediately — there's nothing to wait for.
+ */
+export const awaitBundle = async (ctx: StepContext): Promise<AwaitBundleResult> => {
+  const config = ctx.prior['load-config'] as LoadConfigResult | undefined;
+  const startedAt = Date.now();
+  if (!config || config.mode !== 'customer-bundle') {
+    return {
+      source: config?.mode === 'static' ? 'static-synth' : 'placeholder',
+      waitedMs: 0,
+    };
+  }
+  const key = bundleKvKey(ctx.params.installationId, ctx.params.repoFullName, ctx.params.headSha);
+  while (Date.now() - startedAt < AWAIT_BUNDLE_TIMEOUT_MS) {
+    const meta = await ctx.env.BUNDLES_KV.getWithMetadata<{ etag?: string; bytes?: number }>(key);
+    if (meta.value) {
+      return {
+        source: 'customer-bundle',
+        bundleKey: key,
+        bundleBytes: meta.metadata?.bytes ?? meta.value.length,
+        ...(meta.metadata?.etag ? { bundleEtag: meta.metadata.etag } : {}),
+        waitedMs: Date.now() - startedAt,
+      };
+    }
+    await new Promise((r) => setTimeout(r, AWAIT_BUNDLE_POLL_MS));
+  }
+  // Throw → alarm reschedules with backoff. Use NonRetryable so we
+  // short-circuit to failure once the timeout cap is reached rather than
+  // burning the runner's 5 attempts.
+  throw new NonRetryableError(
+    'E_VALIDATION',
+    `bundle upload timed out after ${AWAIT_BUNDLE_TIMEOUT_MS}ms — did the GH Action run? POST to /api/v1/bundles/upload`,
+  );
+};
+
+/** Load the previously-stored customer bundle from KV, parse + decode it. */
+const loadCustomerBundle = async (
+  env: Env,
+  key: string,
+): Promise<{ wrangler: UploadedBundlePayload['wrangler']; modules: Array<{ name: string; content: Uint8Array; type: string }> } | null> => {
+  const text = await env.BUNDLES_KV.get(key);
+  if (!text) return null;
+  let payload: UploadedBundlePayload;
+  try {
+    payload = JSON.parse(text) as UploadedBundlePayload;
+  } catch {
+    return null;
+  }
+  const decode = (b64: string): Uint8Array => {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+  return {
+    wrangler: payload.wrangler ?? {},
+    modules: payload.modules.map((m) => ({
+      name: m.name,
+      content: decode(m.content_b64),
+      type: m.type ?? 'application/javascript+module',
+    })),
+  };
+};
+
 export const provisionResources = async (ctx: StepContext): Promise<ProvisionResourcesResult> => {
   const client = cfClientFromCtx(ctx);
   ctx.log.info('provision_resources', { script: ctx.scriptName });
@@ -273,15 +466,6 @@ export const provisionResources = async (ctx: StepContext): Promise<ProvisionRes
   const existingD1 = (d1List as Array<{ uuid?: string; name?: string }> | null)?.find((d) => d.name === d1Name);
   const existingKv = (kvList as Array<{ id?: string; title?: string }> | null)?.find((n) => n.title === kvTitle);
   const existingQueue = (queueList as Array<{ queue_id?: string; queue_name?: string }> | null)?.find((q) => q.queue_name === queueName);
-
-  ctx.log.info('provision_resources_lookup', {
-    d1_listed: d1List?.length ?? -1,
-    kv_listed: kvList?.length ?? -1,
-    queue_listed: queueList?.length ?? -1,
-    d1_existing: !!existingD1,
-    kv_existing: !!existingKv,
-    queue_existing: !!existingQueue,
-  });
 
   const d1 = existingD1?.uuid && existingD1.name
     ? { ok: true as const, value: { uuid: existingD1.uuid, name: existingD1.name } }
@@ -330,19 +514,40 @@ const buildRewrite = (
   ctx: StepContext,
   config: LoadConfigResult,
   provisioned: ProvisionResourcesResult,
+  customerBundle: Awaited<ReturnType<typeof loadCustomerBundle>>,
 ): RewrittenBundle => {
-  const moduleSource = config.mode === 'static' && config.staticBundleSource
-    ? config.staticBundleSource
-    : PLACEHOLDER_BUNDLE_SOURCE;
+  let modules: BundleInputs['modules'];
+  let mainModule = config.wrangler.main_module;
+  let wrangler = config.wrangler;
+  if (config.mode === 'customer-bundle' && customerBundle && customerBundle.modules.length > 0) {
+    // Customer-uploaded modules. Use the customer's wrangler config so DO
+    // class names + extra bindings are honoured by the rewriter.
+    modules = customerBundle.modules.map((m) => ({
+      name: m.name,
+      content: m.content,
+      contentType: m.type,
+    }));
+    mainModule = customerBundle.wrangler.main_module ?? modules[0]?.name ?? 'worker.js';
+    // Prefer customer's wrangler when fields are present; fall back to FALLBACK_WRANGLER.
+    wrangler = {
+      main_module: mainModule,
+      compatibility_date: customerBundle.wrangler.compatibility_date ?? config.wrangler.compatibility_date,
+      ...(customerBundle.wrangler.compatibility_flags ? { compatibility_flags: customerBundle.wrangler.compatibility_flags } : {}),
+      bindings: (customerBundle.wrangler.bindings ?? config.wrangler.bindings) as typeof config.wrangler.bindings,
+      do_classes_to_shard: config.wrangler.do_classes_to_shard,
+    };
+  } else {
+    const moduleSource = config.mode === 'static' && config.staticBundleSource
+      ? config.staticBundleSource
+      : PLACEHOLDER_BUNDLE_SOURCE;
+    modules = [
+      { name: mainModule, content: moduleSource, contentType: 'application/javascript+module' },
+    ];
+  }
+
   const inputs: BundleInputs = {
-    wrangler: config.wrangler,
-    modules: [
-      {
-        name: config.wrangler.main_module,
-        content: moduleSource,
-        contentType: 'application/javascript+module',
-      },
-    ],
+    wrangler,
+    modules,
     resources: {
       d1: [provisioned.d1],
       kv: [provisioned.kv],
@@ -357,13 +562,39 @@ const buildRewrite = (
 
 export const rewriteBundleStep = async (ctx: StepContext): Promise<RewriteBundleResult> => {
   const { config, provisioned } = requirePrior(ctx);
-  const rewritten = buildRewrite(ctx, config, provisioned);
-  ctx.log.info('rewrite_bundle', { warnings: rewritten.warnings });
-  return {
+  const awaited = ctx.prior['await-bundle'] as AwaitBundleResult | undefined;
+  let customerBundle: Awaited<ReturnType<typeof loadCustomerBundle>> = null;
+  if (awaited?.source === 'customer-bundle' && awaited.bundleKey) {
+    customerBundle = await loadCustomerBundle(ctx.env, awaited.bundleKey);
+    if (!customerBundle) {
+      throw new NonRetryableError('E_INTERNAL', `customer bundle disappeared from KV: ${awaited.bundleKey}`);
+    }
+  }
+  const rewritten = buildRewrite(ctx, config, provisioned, customerBundle);
+  // Determine the main_module that actually went into the rewritten bundle.
+  // For customer-bundle this comes from the customer's wrangler.json (or
+  // the first module if missing); for static/fallback it's `worker.js`.
+  const mainModule = customerBundle?.wrangler.main_module
+    ?? customerBundle?.modules[0]?.name
+    ?? config.wrangler.main_module;
+  const compatibilityDate = customerBundle?.wrangler.compatibility_date ?? config.wrangler.compatibility_date;
+  ctx.log.info('rewrite_bundle', {
+    source: awaited?.source ?? 'unknown',
+    main_module: mainModule,
+    modules_count: rewritten.modules.length,
+    warnings: rewritten.warnings,
+  });
+  const result: RewriteBundleResult = {
     bindings: rewritten.bindings,
     modulesCount: rewritten.modules.length,
     warnings: rewritten.warnings,
+    mainModule,
+    compatibilityDate,
   };
+  if (customerBundle?.wrangler.compatibility_flags) {
+    result.compatibilityFlags = customerBundle.wrangler.compatibility_flags;
+  }
+  return result;
 };
 
 // CF error codes that mean "the binding's resource hasn't propagated yet"
@@ -377,19 +608,110 @@ const isPropagationLag = (e: CodedError): boolean => {
   return PROPAGATION_ERROR_CODES.some((code) => body.includes(`"code":${code}`));
 };
 
+// ── fork-base-db step ──────────────────────────────────────────────────────
+
+export interface ForkBaseDbResult {
+  source: 'skipped' | 'forked';
+  /** When source==='forked', the source DB id we read from. */
+  baseDatabaseId?: string;
+  /** When source==='forked', byte length of the SQL dump. */
+  sqlBytes?: number;
+  /** Reason for skip: 'no-base-d1' | 'demo-base-equals-target' | 'self-fork-blocked'. */
+  reason?: string;
+}
+
+const sha256Hex = async (s: string): Promise<string> => {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+};
+
+/**
+ * Seed the per-PR D1 with the base-branch DB's schema + data.
+ * Source preference:
+ *   1. repo.baseD1Id   (explicit per-repo configuration, future)
+ *   2. RAFT_DEMO_BASE_D1_ID  (demo-mode default)
+ * Skipped if neither, or if the source equals the target (self-fork guard).
+ */
+export const forkBaseDb = async (ctx: StepContext): Promise<ForkBaseDbResult> => {
+  const { provisioned } = requirePrior(ctx);
+  const repoId = repoIdOf(ctx.params.installationId, ctx.params.repoFullName);
+  const repoRow = await getRepo(ctx.env.DB, repoId);
+  const baseFromRepo = repoRow.ok && repoRow.value?.baseD1Id ? repoRow.value.baseD1Id : null;
+  const baseFromEnv = ctx.env.RAFT_DEMO_BASE_D1_ID ?? null;
+  const baseId = baseFromRepo ?? baseFromEnv;
+
+  if (!baseId) {
+    ctx.log.info('fork_base_db_skipped', { reason: 'no-base-d1' });
+    return { source: 'skipped', reason: 'no-base-d1' };
+  }
+  if (baseId === provisioned.d1.database_id) {
+    ctx.log.warn('fork_base_db_skipped', { reason: 'self-fork-blocked' });
+    return { source: 'skipped', reason: 'self-fork-blocked' };
+  }
+
+  // Export-then-import via CF REST. Failures (source DB missing, export
+  // timeout, CF rate limit) are non-fatal — we degrade to "empty per-PR
+  // DB" rather than failing the whole provision. The PR env is still
+  // usable, just unseeded.
+  const client = cfClientFromCtx(ctx);
+  const sql = await cfD1.exportSqlAndWait(client, baseId);
+  if (!sql.ok) {
+    ctx.log.warn('fork_base_db_export_failed_degrading', {
+      base: baseId, error: sql.error.message,
+    });
+    return { source: 'skipped', reason: `export_failed: ${sql.error.message}` };
+  }
+  const etag = await sha256Hex(sql.value);
+  const importR = await cfD1.importSqlAndWait(client, provisioned.d1.database_id, sql.value, etag);
+  if (!importR.ok) {
+    ctx.log.warn('fork_base_db_import_failed_degrading', {
+      target: provisioned.d1.database_id, error: importR.error.message,
+    });
+    return { source: 'skipped', reason: `import_failed: ${importR.error.message}` };
+  }
+  ctx.log.info('fork_base_db_ok', {
+    base: baseId,
+    target: provisioned.d1.database_id,
+    sql_bytes: sql.value.length,
+  });
+  return {
+    source: 'forked',
+    baseDatabaseId: baseId,
+    sqlBytes: sql.value.length,
+  };
+};
+
+/** Re-load the customer bundle if the prior await-bundle step said so. */
+const maybeLoadCustomerBundle = async (
+  ctx: StepContext,
+): Promise<Awaited<ReturnType<typeof loadCustomerBundle>>> => {
+  const awaited = ctx.prior['await-bundle'] as AwaitBundleResult | undefined;
+  if (awaited?.source !== 'customer-bundle' || !awaited.bundleKey) return null;
+  return loadCustomerBundle(ctx.env, awaited.bundleKey);
+};
+
 export const uploadScript = async (ctx: StepContext): Promise<UploadScriptResult> => {
   const { config, provisioned } = requirePrior(ctx);
   if (!cfWorkers.validateScriptName(ctx.scriptName)) {
     throw new NonRetryableError('E_VALIDATION', `invalid script name: ${ctx.scriptName}`);
   }
-  const rewritten = buildRewrite(ctx, config, provisioned);
+  const customerBundle = await maybeLoadCustomerBundle(ctx);
+  const rewritten = buildRewrite(ctx, config, provisioned, customerBundle);
+  // Resolve the actual main_module + compat date that went into the bundle.
+  // For customer-bundle this is the customer's wrangler.json; for static /
+  // fallback it falls back to the load-config defaults.
+  const resolvedMainModule = customerBundle?.wrangler.main_module
+    ?? customerBundle?.modules[0]?.name
+    ?? config.wrangler.main_module;
+  const resolvedCompatDate = customerBundle?.wrangler.compatibility_date ?? config.wrangler.compatibility_date;
+  const resolvedCompatFlags = customerBundle?.wrangler.compatibility_flags ?? config.wrangler.compatibility_flags ?? [];
   const client = cfClientFromCtx(ctx);
   const params: Parameters<typeof cfWorkers.uploadScript>[1] = {
     scriptName: ctx.scriptName,
-    mainModule: config.wrangler.main_module,
+    mainModule: resolvedMainModule,
     modules: rewritten.modules,
-    compatibilityDate: config.wrangler.compatibility_date,
-    compatibilityFlags: config.wrangler.compatibility_flags ?? [],
+    compatibilityDate: resolvedCompatDate,
+    compatibilityFlags: resolvedCompatFlags,
     bindings: rewritten.bindings as cfWorkers.WorkerBinding[],
     // Free-tier substitution: tail_consumers requires Workers Paid (CF error
     // code 100150). v1 omits Tail Workers; live logs in the dashboard work
@@ -448,15 +770,25 @@ const probeLivePreview = async (ctx: StepContext): Promise<LiveProbe | null> => 
 const buildPreviewCommentBody = (
   ctx: StepContext,
   config: LoadConfigResult,
-  aiReview: string | null,
   probe: LiveProbe | null,
 ): string => {
   const dashUrl = `https://raft-control.${ctx.env.CF_WORKERS_SUBDOMAIN}/dashboard/pr/${encodeURIComponent(ctx.prEnvId)}`;
-  const bundleLine = config.mode === 'static' && config.staticSynth
-    ? `**Bundle:** \`static-synth\` · ${config.staticSynth.fileCount} file${config.staticSynth.fileCount === 1 ? '' : 's'} · ${(config.staticSynth.totalBytes / 1024).toFixed(1)} KB`
-    : `**Bundle:** \`placeholder\` (no \`index.html\` found and customer bundle not yet uploaded)`;
+  const awaited = ctx.prior['await-bundle'] as AwaitBundleResult | undefined;
+  let bundleLine: string;
+  if (config.mode === 'customer-bundle') {
+    const sizeKb = awaited?.bundleBytes ? (awaited.bundleBytes / 1024).toFixed(1) : '?';
+    bundleLine = `**Bundle:** customer Worker (uploaded via GitHub Action) · ${sizeKb} KB`;
+  } else if (config.mode === 'static' && config.staticSynth) {
+    bundleLine = `**Bundle:** static site · ${config.staticSynth.fileCount} file${config.staticSynth.fileCount === 1 ? '' : 's'} · ${(config.staticSynth.totalBytes / 1024).toFixed(1)} KB`;
+  } else {
+    // Fallback (no buildable source). Still complete the lifecycle but tell
+    // the customer how to fix it. This shouldn't normally render in
+    // production — both the customer-bundle and static-synth paths catch
+    // every healthy repo.
+    bundleLine = `**Configuration needed.** No \`wrangler.{jsonc,json,toml}\` (with the Raft GitHub Action) and no \`index.html\` found in this repo. Add one to deploy your real code on the next push.`;
+  }
   const lines = [
-    `### 🛟 Raft preview ready`,
+    `### Raft preview`,
     ``,
     `**Preview:** ${ctx.previewHostname}/`,
     ``,
@@ -464,19 +796,16 @@ const buildPreviewCommentBody = (
     `**Scope:** \`${ctx.scope}\` · **Worker:** \`${ctx.scriptName}\``,
   ];
   if (probe) {
-    const dot = probe.ok ? '🟢' : '🔴';
+    const status = probe.ok ? 'OK' : 'DOWN';
     lines.push(
-      `**Live probe:** ${dot} HTTP ${probe.status} · ${probe.ms} ms · ${(probe.bytes / 1024).toFixed(1)} KB`,
+      `**Probe:** ${status} · HTTP ${probe.status} · ${probe.ms} ms · ${(probe.bytes / 1024).toFixed(1)} KB`,
     );
-  }
-  if (aiReview) {
-    lines.push('', '<details><summary>🤖 <b>AI review</b> (Claude Haiku)</summary>', '', aiReview, '</details>');
   }
   lines.push(
     ``,
-    `[Open in dashboard ↗](${dashUrl})`,
+    `[Open in dashboard](${dashUrl})`,
     ``,
-    `<sub>Per-PR isolated environment provisioned by [Raft](https://github.com/Adi-gitX/Rift) on Cloudflare Workers free tier. Auto-torn-down on PR close.</sub>`,
+    `<sub>Per-PR isolated Cloudflare environment provisioned by [Raft](https://github.com/Adi-gitX/Rift). Torn down automatically when the PR closes.</sub>`,
   );
   return lines.join('\n');
 };
@@ -511,37 +840,14 @@ export const routeAndComment = async (ctx: StepContext): Promise<RouteAndComment
       ctx.params.installationId,
     );
 
-    // Optional AI review (Claude Haiku). Only fires for static-synth previews
-    // — placeholder bundles aren't worth reviewing. Skip silently if the
-    // ANTHROPIC_API_KEY secret isn't configured.
-    let aiReview: string | null = null;
-    if (ctx.env.ANTHROPIC_API_KEY && config.mode === 'static' && config.staticBundleSource) {
-      const t0 = Date.now();
-      const review = await reviewBundle(ctx.env.ANTHROPIC_API_KEY, {
-        bundleSource: config.staticBundleSource,
-        prNumber: ctx.params.prNumber,
-        repoFullName: ctx.params.repoFullName,
-      });
-      if (review) {
-        aiReview = review.markdown;
-        ctx.log.info('ai_review_ok', {
-          input_tokens: review.usage.inputTokens,
-          output_tokens: review.usage.outputTokens,
-          ms: Date.now() - t0,
-        });
-      } else {
-        ctx.log.warn('ai_review_failed', { ms: Date.now() - t0 });
-      }
-    }
-
-    // Live probe runs in parallel with the GitHub install-token mint (already
-    // done above), so it adds at most ~200ms of perceivable wall-clock time.
+    // Probe the live preview so the comment shows whether the new Worker
+    // is actually serving traffic, not just whether the route was written.
     const probe = await probeLivePreview(ctx);
     if (probe) {
       ctx.log.info('preview_probe', { status: probe.status, ms: probe.ms, bytes: probe.bytes });
     }
 
-    const body = buildPreviewCommentBody(ctx, config, aiReview, probe);
+    const body = buildPreviewCommentBody(ctx, config, probe);
     const upsert = await upsertStickyComment({
       token,
       ownerRepo: ctx.params.repoFullName,
@@ -552,8 +858,7 @@ export const routeAndComment = async (ctx: StepContext): Promise<RouteAndComment
     await setResourceHandles(ctx.env.DB, ctx.prEnvId, { prCommentId: upsert.commentId });
     result.prCommentId = upsert.commentId;
     result.prCommentCreated = upsert.created;
-    if (aiReview) result.aiReviewed = true;
-    ctx.log.info('pr_comment_upserted', { comment_id: upsert.commentId, created: upsert.created, ai: !!aiReview });
+    ctx.log.info('pr_comment_upserted', { comment_id: upsert.commentId, created: upsert.created });
   } catch (e) {
     ctx.log.warn('pr_comment_skipped', { error: String(e) });
     result.prCommentSkippedReason = String(e);
@@ -563,7 +868,9 @@ export const routeAndComment = async (ctx: StepContext): Promise<RouteAndComment
 
 export const STEP_FNS = {
   'load-config': loadConfig,
+  'await-bundle': awaitBundle,
   'provision-resources': provisionResources,
+  'fork-base-db': forkBaseDb,
   'rewrite-bundle': rewriteBundleStep,
   'upload-script': uploadScript,
   'route-and-comment': routeAndComment,
@@ -571,7 +878,9 @@ export const STEP_FNS = {
 
 export interface StepResultMap {
   'load-config': LoadConfigResult;
+  'await-bundle': AwaitBundleResult;
   'provision-resources': ProvisionResourcesResult;
+  'fork-base-db': ForkBaseDbResult;
   'rewrite-bundle': RewriteBundleResult;
   'upload-script': UploadScriptResult;
   'route-and-comment': RouteAndCommentResult;
