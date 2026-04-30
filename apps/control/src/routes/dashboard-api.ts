@@ -44,6 +44,12 @@ dashboardApi.get('/api/me', async (c) => {
         email: session.sub,
         exp: session.exp,
         installations: installs.ok ? installs.value : [],
+        // Surface the GitHub App identity so the SPA can build the
+        // "Install on a repo" deep-link without hard-coding the name.
+        githubApp: {
+          name: c.env.GITHUB_APP_NAME,
+          installUrl: `https://github.com/apps/${c.env.GITHUB_APP_NAME}/installations/new`,
+        },
       },
       c.var.requestId,
     ),
