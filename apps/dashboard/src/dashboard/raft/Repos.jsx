@@ -33,6 +33,7 @@ const StatusBadge = ({ status, tone }) => {
 export const RaftRepos = () => {
   const navigate = useNavigate();
   const [repos, setRepos] = useState([]);
+  const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [q, setQ] = useState("");
@@ -40,8 +41,9 @@ export const RaftRepos = () => {
   const reload = async () => {
     setLoading(true);
     try {
-      const r = await api.repos();
+      const [r, m] = await Promise.all([api.repos(), api.me().catch(() => null)]);
       setRepos(r?.data?.repos ?? []);
+      setMe(m?.data ?? null);
       setErr(null);
     } catch (e) {
       setErr(String(e));
@@ -50,6 +52,7 @@ export const RaftRepos = () => {
     }
   };
   useEffect(() => { reload(); }, []);
+  const installUrl = me?.githubApp?.installUrl;
 
   const filtered = useMemo(() => {
     const ql = q.toLowerCase();
@@ -75,6 +78,16 @@ export const RaftRepos = () => {
               className="bg-white/[0.04] border border-white/[0.06] rounded h-8 pl-8 pr-2 text-[12.5px] text-white/85 placeholder-white/30 outline-none focus:border-white/20 w-64"
             />
           </div>
+          {installUrl && (
+            <a
+              href={installUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded h-8 px-3 text-[12px] font-medium border border-[#ED462D]/40 text-white bg-[#ED462D]/10 hover:bg-[#ED462D]/20 transition-colors"
+            >
+              + Install on a repo
+            </a>
+          )}
           <button onClick={reload} className="fc-btn-icon" title="Refresh"><RefreshCw size={14} /></button>
         </div>
       </div>
@@ -92,6 +105,16 @@ export const RaftRepos = () => {
       {!loading && !err && filtered.length === 0 && (
         <div className="mx-8 mt-12 border border-white/[0.06] rounded p-10 text-center">
           <p className="text-[13px] text-white/55">No repositories found.</p>
+          {installUrl && (
+            <a
+              href={installUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-4 inline-flex items-center gap-1.5 rounded h-9 px-4 text-[13px] font-medium border border-[#ED462D]/40 text-white bg-[#ED462D]/10 hover:bg-[#ED462D]/20 transition-colors"
+            >
+              Install Raft on a repo →
+            </a>
+          )}
         </div>
       )}
       {!loading && filtered.length > 0 && (
@@ -117,8 +140,9 @@ export const RaftRepos = () => {
 };
 
 export const RaftRepoDetail = () => {
-  const { id: rawId } = useParams();
-  const id = decodeURIComponent(rawId ?? "");
+  // See PrEnvDetail — splat route avoids %2F-decoding breakage.
+  const params = useParams();
+  const id = decodeURIComponent(params["*"] ?? "");
   const navigate = useNavigate();
   const [repo, setRepo] = useState(null);
   const [prs, setPrs] = useState([]);
