@@ -22,8 +22,9 @@ import { dashboardApi } from './routes/dashboard-api.ts';
 import { handleQueueBatch } from './queue/consumer.ts';
 import { handleTailQueueBatch } from './queue/tail-consumer.ts';
 import { sweepStaleEnvironments } from './scheduled/sweep.ts';
+import { runAlertChecks } from './scheduled/alerts.ts';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 const app = new Hono<ControlAppEnv>();
 
@@ -66,6 +67,7 @@ const handler: ExportedHandler<Env, RaftQueueMessage | TailEvent> = {
   },
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(sweepStaleEnvironments(env));
+    ctx.waitUntil(runAlertChecks(env));
   },
   async queue(batch, env, ctx) {
     if (batch.queue === 'raft-tail-events') {
