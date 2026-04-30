@@ -9,18 +9,26 @@ import type { ProvisionPRParams } from '../../env.ts';
 
 export type ProvisionStep =
   | 'load-config'
+  | 'await-bundle'
   | 'provision-resources'
+  | 'fork-base-db'
   | 'rewrite-bundle'
   | 'upload-script'
   | 'route-and-comment';
 
-// TODO(raft:slice-D) — `prepare-base-export` and `build-bundle` are skipped in v1
-// (no D1 fork in demo, customer-side GH Action provides the bundle). Both belong
-// in this list before steps 4–8 in the production code path.
-
+/**
+ * Provision pipeline. Notable branches:
+ *   - `await-bundle`: customer-bundle → poll BUNDLES_KV (~5min cap);
+ *     static / fallback → no-op.
+ *   - `fork-base-db`: if the repo declares a base D1 (or RAFT_DEMO_BASE_D1_ID
+ *     is set), export-then-import to seed the per-PR DB with base-branch
+ *     schema + data; otherwise no-op (empty DB).
+ */
 export const STEP_ORDER: readonly ProvisionStep[] = [
   'load-config',
+  'await-bundle',
   'provision-resources',
+  'fork-base-db',
   'rewrite-bundle',
   'upload-script',
   'route-and-comment',
@@ -33,6 +41,11 @@ export interface RunnerErrorEntry {
   ts: number;
   message: string;
   attempt: number;
+}
+
+export interface StepTiming {
+  startedAt?: number;
+  finishedAt?: number;
 }
 
 export interface ProvisionRunnerState {
@@ -48,6 +61,8 @@ export interface ProvisionRunnerState {
   startedAt: number;
   finishedAt?: number;
   errorHistory: RunnerErrorEntry[];
+  /** Per-step wall-clock timing; populated as steps run. */
+  stepTimings?: Partial<Record<ProvisionStep, StepTiming>>;
 }
 
 export const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000];
