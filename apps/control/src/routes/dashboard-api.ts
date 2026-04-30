@@ -50,6 +50,12 @@ dashboardApi.get('/api/me', async (c) => {
           name: c.env.GITHUB_APP_NAME,
           installUrl: `https://github.com/apps/${c.env.GITHUB_APP_NAME}/installations/new`,
         },
+        // CF account context lets the SPA build dash.cloudflare.com deep-links
+        // (D1 / KV / Worker resource pages) without hard-coding the account id.
+        cloudflare: {
+          accountId: c.env.CF_OWN_ACCOUNT_ID,
+          workersSubdomain: c.env.CF_WORKERS_SUBDOMAIN,
+        },
       },
       c.var.requestId,
     ),
@@ -275,7 +281,7 @@ dashboardApi.get('/api/health', async (c) => {
   return c.json(
     apiOk(
       {
-        control: { status: 'ok' as const, version: '0.1.0' },
+        control: { status: 'ok' as const, version: '0.2.0' },
         dispatcher: { ...dispatcher, url: dispatcherUrl },
         tail: { ...tail, url: tailUrl },
         cron: { schedule: '0 4 * * *' },
