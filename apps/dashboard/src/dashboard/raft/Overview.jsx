@@ -50,10 +50,12 @@ const StatCardRow = ({ stats, navigate }) => {
       <div className="fc-endpoints">
         {ENDPOINTS.map((ep) => {
           const value = map[ep.key] ?? 0;
+          // Pass the tab via query param so the list lands pre-filtered
+          // on the same bucket the operator clicked.
           return (
             <button
               key={ep.key}
-              onClick={() => navigate("/dashboard/pr-envs")}
+              onClick={() => navigate(`/dashboard/pr-envs?tab=${ep.key}`)}
               className="fc-endpoint-cell text-left transition-colors hover:bg-white/[0.015]"
               data-testid={`endpoint-${ep.key}`}
             >
