@@ -13,7 +13,7 @@ import { PROVISION_STEPS, TEARDOWN_STEPS } from "@/dashboard/nav";
 import { api, fmtDate, fmtRelative, stateTone } from "@/dashboard/raft/api";
 import { StepLatencyBars } from "@/dashboard/raft/charts";
 
-const ACCOUNT_ID = "5aabf3b807d9050ab805de40e0280ef3";
+// Cloudflare account id is fetched from /api/me at mount time; never hardcoded.
 
 const StatusBadge = ({ status, tone, big = false }) => {
   const dotMap = {
@@ -209,19 +209,35 @@ const ActionButton = ({ icon, children, tone = "ghost", onClick, disabled }) => 
 );
 
 /**
- * Best-effort per-step latency from the runner snapshot. The runner caches a
- * `step:NAME` result per step but doesn't currently store per-step durations,
- * so we approximate: completed steps share equal slices of the total runtime,
- * the in-flight step shows elapsed-since-step-start, queued steps show null.
- * This visualization is honest about being an approximation; once the runner
- * persists per-step `started_at`/`finished_at` we can swap in exact values.
+ * Per-step latency from the runner's persisted timings. Each step records
+ * its own startedAt + finishedAt as it runs (see ProvisionRunner.runStep).
+ * Falls back to "approximate equal slices" only if no timing data exists
+ * (legacy snapshots from before timings were tracked).
  */
 const buildLatencySteps = (runner) => {
   const order = PROVISION_STEPS.map((s) => ({ key: s.key, label: s.label }));
   const snap = runner?.snapshot;
   if (!snap) return order.map((s) => ({ ...s, ms: null, status: "queued" }));
+  const timings = snap.stepTimings ?? {};
   const cursor = snap.cursor ?? 0;
   const status = snap.status ?? "pending";
+  const haveTimings = order.some((s) => timings[s.key]?.startedAt);
+
+  if (haveTimings) {
+    return order.map((s, i) => {
+      const t = timings[s.key];
+      if (t?.finishedAt && t?.startedAt) {
+        return { ...s, ms: t.finishedAt - t.startedAt, status: "ok" };
+      }
+      if (t?.startedAt && i === cursor && status === "running") {
+        return { ...s, ms: Math.max(0, Date.now() - t.startedAt), status: "running" };
+      }
+      if (i === cursor && status === "failed") return { ...s, ms: 0, status: "failed" };
+      return { ...s, ms: null, status: "queued" };
+    });
+  }
+
+  // Legacy fallback — equal slices of total wall-clock.
   const started = snap.startedAt ?? null;
   const finished = snap.finishedAt ?? null;
   const total = started && finished ? finished - started : started ? Math.max(0, Date.now() - started) : 0;
@@ -230,7 +246,7 @@ const buildLatencySteps = (runner) => {
   return order.map((s, i) => {
     if (i < completed) return { ...s, ms: perCompleted, status: "ok" };
     if (i === cursor && status === "running") return { ...s, ms: total - perCompleted * completed, status: "running" };
-    if (i === cursor && status === "failed")  return { ...s, ms: 0, status: "failed" };
+    if (i === cursor && status === "failed") return { ...s, ms: 0, status: "failed" };
     return { ...s, ms: null, status: "queued" };
   });
 };
@@ -248,10 +264,17 @@ export const RaftPrEnvDetail = () => {
   const [logs, setLogs] = useState([]);
   const [runner, setRunner] = useState(null);
   const [teardownRunner, setTeardownRunner] = useState(null);
+  const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [acting, setActing] = useState(false);
   const pollRef = useRef(null);
+
+  // Fetch /api/me once for the Cloudflare account context (used to build
+  // dash.cloudflare.com deep-links). Doesn't poll — it never changes.
+  useEffect(() => {
+    api.me().then((m) => setMe(m?.data ?? null)).catch(() => {});
+  }, []);
 
   const refresh = async () => {
     try {
@@ -316,17 +339,18 @@ export const RaftPrEnvDetail = () => {
   }
   if (!pr) return <div className="px-8 pt-12 text-white/55 text-[13px]">PR environment not found.</div>;
 
-  const cfDashD1 = pr.resources?.d1DatabaseId
-    ? `https://dash.cloudflare.com/${ACCOUNT_ID}/workers/d1/databases/${pr.resources.d1DatabaseId}`
+  const acct = me?.cloudflare?.accountId ?? null;
+  const cfDashD1 = acct && pr.resources?.d1DatabaseId
+    ? `https://dash.cloudflare.com/${acct}/workers/d1/databases/${pr.resources.d1DatabaseId}`
     : null;
-  const cfDashKv = pr.resources?.kvNamespaceId
-    ? `https://dash.cloudflare.com/${ACCOUNT_ID}/workers/kv/namespaces/${pr.resources.kvNamespaceId}`
+  const cfDashKv = acct && pr.resources?.kvNamespaceId
+    ? `https://dash.cloudflare.com/${acct}/workers/kv/namespaces/${pr.resources.kvNamespaceId}`
     : null;
-  const cfDashWorker = pr.resources?.workerScriptName
-    ? `https://dash.cloudflare.com/${ACCOUNT_ID}/workers/services/view/${pr.resources.workerScriptName}/production`
+  const cfDashWorker = acct && pr.resources?.workerScriptName
+    ? `https://dash.cloudflare.com/${acct}/workers/services/view/${pr.resources.workerScriptName}/production`
     : null;
-  const cfWorkerLogs = pr.resources?.workerScriptName
-    ? `https://dash.cloudflare.com/${ACCOUNT_ID}/workers/services/view/${pr.resources.workerScriptName}/production/logs`
+  const cfWorkerLogs = acct && pr.resources?.workerScriptName
+    ? `https://dash.cloudflare.com/${acct}/workers/services/view/${pr.resources.workerScriptName}/production/logs`
     : null;
 
   const tone = stateTone(pr.state);
@@ -363,11 +387,31 @@ export const RaftPrEnvDetail = () => {
         </p>
         {(() => {
           const lc = runner?.stepResults?.["load-config"];
+          const ab = runner?.stepResults?.["await-bundle"];
           if (!lc?.mode) return null;
-          if (lc.mode === "static") {
-            return (
-              <div className="mt-2 inline-flex items-center gap-2 rounded border border-emerald-900/60 bg-emerald-950/30 px-2 py-1 text-[11px] d-mono text-[#5BE08F]">
-                <span>● bundle: static-synth</span>
+          const chips = [];
+          if (lc.mode === "customer-bundle") {
+            chips.push(
+              <div key="mode" className="inline-flex items-center gap-2 rounded border border-[#ED462D]/40 bg-[#ED462D]/10 px-2 py-1 text-[11px] d-mono text-[#ED462D]">
+                <span>customer Worker</span>
+                {ab?.bundleBytes !== undefined && (
+                  <>
+                    <span className="text-white/45">·</span>
+                    <span className="text-white/85">{(ab.bundleBytes / 1024).toFixed(1)} KB</span>
+                  </>
+                )}
+                {ab?.waitedMs !== undefined && ab.waitedMs > 0 && (
+                  <>
+                    <span className="text-white/45">·</span>
+                    <span className="text-white/65">awaited bundle {(ab.waitedMs / 1000).toFixed(1)}s</span>
+                  </>
+                )}
+              </div>
+            );
+          } else if (lc.mode === "static") {
+            chips.push(
+              <div key="mode" className="inline-flex items-center gap-2 rounded border border-emerald-900/60 bg-emerald-950/30 px-2 py-1 text-[11px] d-mono text-[#5BE08F]">
+                <span>static site</span>
                 <span className="text-white/45">·</span>
                 <span className="text-white/85">{lc.staticSynth?.fileCount ?? 0} files</span>
                 <span className="text-white/45">·</span>
@@ -379,17 +423,16 @@ export const RaftPrEnvDetail = () => {
                 )}
               </div>
             );
-          }
-          if (lc.mode === "fallback") {
-            return (
-              <div className="mt-2 inline-flex items-center gap-2 rounded border border-white/[0.06] bg-white/[0.02] px-2 py-1 text-[11px] d-mono text-white/55">
-                <span>○ bundle: placeholder</span>
-                <span className="text-white/35">·</span>
-                <span>no index.html / no customer bundle yet</span>
+          } else if (lc.mode === "fallback") {
+            chips.push(
+              <div key="mode" className="inline-flex items-center gap-2 rounded border border-amber-900/60 bg-amber-950/30 px-2 py-1 text-[11px] d-mono text-[#EAB308]">
+                <span>configuration needed</span>
+                <span className="text-white/45">·</span>
+                <span className="text-white/65">add wrangler.jsonc with the Raft GitHub Action, or an index.html</span>
               </div>
             );
           }
-          return null;
+          return <div className="mt-2 flex items-center gap-2 flex-wrap">{chips}</div>;
         })()}
       </div>
 
