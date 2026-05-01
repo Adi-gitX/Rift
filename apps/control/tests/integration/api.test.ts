@@ -46,7 +46,7 @@ describe('Slice G API auth', () => {
 });
 
 describe('Slice G bundle upload', () => {
-  it('accepts a valid token + headers, stores in BUNDLES_KV', async () => {
+  it('accepts a valid JSON bundle, stores in BUNDLES_KV under the runner-compatible key', async () => {
     const token = mintUploadToken();
     const hash = await hashUploadToken(token);
     await upsertInstallation(env.DB, {
@@ -63,20 +63,34 @@ describe('Slice G bundle upload', () => {
     });
     if (!repo.ok) throw repo.error;
 
-    const bundle = new TextEncoder().encode('FAKE-WORKER-BUNDLE');
+    const bundle = {
+      wrangler: { main_module: 'index.js', compatibility_date: '2026-04-29' },
+      modules: [
+        {
+          name: 'index.js',
+          content_b64: btoa('export default { fetch: () => new Response("hi") }'),
+          type: 'application/javascript+module',
+        },
+      ],
+    };
     const res = await SELF.fetch('https://control.test/api/v1/bundles/upload', {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
         'x-raft-repo-id': repo.value.id,
         'x-raft-head-sha': 'sha-bun-1',
-        'content-type': 'application/octet-stream',
+        'content-type': 'application/json',
       },
-      body: bundle,
+      body: JSON.stringify(bundle),
     });
     expect(res.status).toBe(200);
-    const stored = await env.BUNDLES_KV.get(`bundle:${repo.value.id}:sha-bun-1`, 'arrayBuffer');
+    // Key MUST mirror runner/provision/steps.ts `bundleKvKey()`.
+    const expectedKey = `bundle:inst-bun:a/b:sha-bun-1`;
+    const stored = await env.BUNDLES_KV.get(expectedKey);
     expect(stored).not.toBeNull();
+    const parsed = JSON.parse(stored!);
+    expect(parsed.modules).toHaveLength(1);
+    expect(parsed.modules[0].name).toBe('index.js');
   });
 
   it('rejects upload with wrong token', async () => {
