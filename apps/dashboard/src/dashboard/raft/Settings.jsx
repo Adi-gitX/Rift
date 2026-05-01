@@ -28,19 +28,37 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
+      # Build the dist/ directory. Wrangler emits a single index.js (+ chunks)
+      # plus a wrangler.json describing bindings.
       - run: npx wrangler deploy --dry-run --outdir=dist
-      - run: cd dist && zip -r ../bundle.zip .
+      - name: Pack as JSON bundle
+        run: |
+          node -e "
+            const fs = require('fs'); const path = require('path');
+            const wrangler = JSON.parse(fs.readFileSync('dist/wrangler.json','utf8'));
+            const modules = fs.readdirSync('dist')
+              .filter(f => f !== 'wrangler.json')
+              .map(name => ({
+                name,
+                content_b64: fs.readFileSync(path.join('dist', name)).toString('base64'),
+                type: name.endsWith('.wasm') ? 'application/wasm'
+                  : name.endsWith('.js') || name.endsWith('.mjs') ? 'application/javascript+module'
+                  : 'application/octet-stream',
+              }));
+            fs.writeFileSync('bundle.json', JSON.stringify({ wrangler, modules }));
+          "
       - name: Upload to Raft
         env:
-          RAFT_UPLOAD_URL: \${{ secrets.RAFT_UPLOAD_URL }}
+          RAFT_UPLOAD_URL:   \${{ secrets.RAFT_UPLOAD_URL }}
           RAFT_UPLOAD_TOKEN: \${{ secrets.RAFT_UPLOAD_TOKEN }}
-          RAFT_REPO_ID: \${{ secrets.RAFT_REPO_ID }}
+          RAFT_REPO_ID:      \${{ secrets.RAFT_REPO_ID }}
         run: |
           curl -sS -X POST "$RAFT_UPLOAD_URL/api/v1/bundles/upload" \\
             -H "Authorization: Bearer $RAFT_UPLOAD_TOKEN" \\
             -H "X-Raft-Repo-Id: $RAFT_REPO_ID" \\
             -H "X-Raft-Head-Sha: \${{ github.event.pull_request.head.sha }}" \\
-            --data-binary @bundle.zip --fail-with-body
+            -H "content-type: application/json" \\
+            --data-binary @bundle.json --fail-with-body
 `;
 
 const CodeBlock = ({ children, label }) => {
