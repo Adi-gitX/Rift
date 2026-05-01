@@ -293,7 +293,7 @@ export const RaftOverview = () => {
 
   return (
     <div data-testid="raft-overview">
-      <Hero email={me?.email} deployVersion={"0.1.0"} />
+      <Hero email={me?.email} deployVersion={"0.2.0"} />
       <div className="px-10">
         <StatCardRow stats={stats} navigate={navigate} />
       </div>
