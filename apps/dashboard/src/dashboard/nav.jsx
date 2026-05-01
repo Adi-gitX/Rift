@@ -60,11 +60,13 @@ export const INTEGRATIONS = [
 
 /** Provisioning steps timeline shown on Overview / PR detail. */
 export const PROVISION_STEPS = [
-  { key: "load-config",        label: "load-config",        desc: "Fetch .raft.json at head SHA" },
-  { key: "provision-resources",label: "provision-resources",desc: "Create D1 + KV + Queue in parallel" },
+  { key: "load-config",        label: "load-config",        desc: "Detect customer-bundle / static / fallback at head SHA" },
+  { key: "await-bundle",       label: "await-bundle",       desc: "Wait for GH Action upload (≤5min cap, no-op for static)" },
+  { key: "provision-resources",label: "provision-resources",desc: "Create D1 + KV + Queue (idempotent, list-then-create)" },
+  { key: "fork-base-db",       label: "fork-base-db",       desc: "Export base D1 → import into per-PR D1 (no-op if no base)" },
   { key: "rewrite-bundle",     label: "rewrite-bundle",     desc: "Swap binding IDs, codegen DO wrappers" },
-  { key: "upload-script",      label: "upload-script",      desc: "PUT /workers/scripts/{name}" },
-  { key: "route-and-comment",  label: "route-and-comment",  desc: "Write ROUTES KV + sticky PR comment" },
+  { key: "upload-script",      label: "upload-script",      desc: "PUT /workers/scripts/{name} + enable subdomain" },
+  { key: "route-and-comment",  label: "route-and-comment",  desc: "Write ROUTES KV + sticky PR comment + live probe" },
 ];
 
 export const TEARDOWN_STEPS = [
