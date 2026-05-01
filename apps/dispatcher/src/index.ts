@@ -29,6 +29,30 @@ const indexHtml = (origin: string): string =>
 ProvisionRunner posts the full URL as a sticky comment on the PR. Requests
 are 302-redirected to the per-PR Worker's <code>*.workers.dev</code> URL.</p>`;
 
+/**
+ * Compute a short HMAC-SHA256 token for the given scope. The synthesized
+ * static worker (and any customer worker that opts in) verifies this
+ * before serving content. Without the token, the bare *.workers.dev URL
+ * is unauth'd and could be hit by anyone with the script name.
+ *
+ * 16-byte tag truncation keeps the URL short while staying well above
+ * brute-force-feasible.
+ */
+const signScope = async (scope: string, secret: string): Promise<string> => {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`raft-preview:${scope}`)));
+  // base64url, first 16 bytes.
+  let s = '';
+  for (let i = 0; i < 16; i++) s += String.fromCharCode(sig[i]!);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
 const handler: ExportedHandler<DispatcherEnv> = {
   async fetch(req, env, _ctx) {
     const url = new URL(req.url);
@@ -45,8 +69,20 @@ const handler: ExportedHandler<DispatcherEnv> = {
       return new Response(`No preview for ${scope}`, { status: 404 });
     }
     const rest = segments.slice(1).join('/');
-    const target = `https://${scriptName}.${env.CF_WORKERS_SUBDOMAIN}/${rest}${url.search}`;
-    return Response.redirect(target, 302);
+    // Append the per-scope auth token + a Set-Cookie on the redirect, so
+    // subsequent navigation under the user worker keeps the cookie (browser
+    // honours Set-Cookie on 3xx). The query param doubles as the first-hit
+    // gate for clients that don't store cookies.
+    const token = await signScope(scope, env.INTERNAL_DISPATCH_SECRET);
+    const sep = url.search ? '&' : (rest.includes('?') ? '&' : '?');
+    const search = url.search ? `${url.search}${sep}raft_t=${token}` : `?raft_t=${token}`;
+    const target = `https://${scriptName}.${env.CF_WORKERS_SUBDOMAIN}/${rest}${search}`;
+    const headers = new Headers({ location: target });
+    headers.append(
+      'set-cookie',
+      `raft_t=${token}; Path=/; Max-Age=86400; SameSite=Lax; Secure`,
+    );
+    return new Response(null, { status: 302, headers });
   },
 };
 
