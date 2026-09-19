@@ -84,7 +84,12 @@ export const pollExport = (
   bookmark: string,
 ): Promise<Result<D1ExportPollShape, CodedError>> =>
   client.req(
-    { method: 'POST', path: `/d1/database/${id}/export`, body: { current_bookmark: bookmark } },
+    {
+      method: 'POST',
+      path: `/d1/database/${id}/export`,
+      // CF rejects the poll without output_format (7400 "output_format => Required").
+      body: { output_format: 'polling', current_bookmark: bookmark },
+    },
     d1ExportPollSchema,
   );
 
@@ -178,7 +183,7 @@ export const exportSqlAndWait = async (
   let current = start.value;
   let attempts = 0;
   while (current.status !== 'complete') {
-    if (current.status === 'error') {
+    if (current.status === 'error' || current.success === false || current.error) {
       return err(new Coded('E_CF_API', `d1_export_error: ${current.error ?? 'unknown'}`));
     }
     if (++attempts > POLL_MAX_ATTEMPTS) {
@@ -189,12 +194,13 @@ export const exportSqlAndWait = async (
     if (!next.ok) return err(next.error);
     current = next.value;
   }
-  if (!current.signed_url) {
+  const signedUrl = current.signed_url ?? current.result?.signed_url;
+  if (!signedUrl) {
     return err(new Coded('E_CF_API', 'd1_export_missing_signed_url'));
   }
   let res: Response;
   try {
-    res = await fetch(current.signed_url);
+    res = await fetch(signedUrl);
   } catch (cause) {
     return err(new Coded('E_CF_API', 'd1_export_download_network', { cause }));
   }

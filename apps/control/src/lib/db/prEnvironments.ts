@@ -54,7 +54,11 @@ export const createPrEnvironment = (
            -- A reopened / re-pushed PR whose env was torn down or failed starts over.
            state = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN 'pending' ELSE pr_environments.state END,
            state_reason = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.state_reason END,
-           torn_down_at = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.torn_down_at END`,
+           torn_down_at = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.torn_down_at END,
+           d1_database_id = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.d1_database_id END,
+           kv_namespace_id = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.kv_namespace_id END,
+           queue_id = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.queue_id END,
+           worker_script_name = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.worker_script_name END`,
       )
       .bind(id, input.repoId, input.prNumber, input.headSha, now, now)
       .run();

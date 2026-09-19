@@ -23,11 +23,17 @@ export const d1DatabaseSchema = z.object({
 export type D1DatabaseShape = z.infer<typeof d1DatabaseSchema>;
 
 export const d1ExportPollSchema = z.object({
-  status: z.enum(['active', 'complete', 'error']),
+  // CF returns {success:false, error} with no status once the export is gone.
+  success: z.boolean().optional(),
+  status: z.enum(['active', 'complete', 'error']).optional(),
   at_bookmark: z.string().optional(),
   signed_url: z.string().url().optional(),
   filename: z.string().optional(),
   error: z.string().optional(),
+  /** On completion CF nests the download under result.result. */
+  result: z
+    .object({ signed_url: z.string().url().optional(), filename: z.string().optional() })
+    .optional(),
 });
 export type D1ExportPollShape = z.infer<typeof d1ExportPollSchema>;
 

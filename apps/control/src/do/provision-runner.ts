@@ -69,6 +69,21 @@ export class ProvisionRunner extends DurableObject<Env> {
     for (const name of SHA_DEPENDENT_STEPS) {
       await this.ctx.storage.delete(stepKey(name));
     }
+    // A fork that degraded (export/import failure) left an empty DB; retry it on
+    // the next run rather than pinning the PR to "not forked" forever.
+    // Resources deleted by a teardown (row handles reset to NULL on reopen) must
+    // be re-created, so drop the one-shot caches too.
+    const row = await getPrEnvironment(this.env.DB, state.prEnvId);
+    if (row.ok && row.value && !row.value.resources.d1DatabaseId) {
+      await this.ctx.storage.delete(stepKey('provision-resources'));
+      await this.ctx.storage.delete(stepKey('fork-base-db'));
+    }
+    const fork = await this.ctx.storage.get<{ source?: string; reason?: string }>(
+      stepKey('fork-base-db'),
+    );
+    if (fork?.source === 'skipped' && /^(export|import)_failed/.test(fork.reason ?? '')) {
+      await this.ctx.storage.delete(stepKey('fork-base-db'));
+    }
     const fresh: ProvisionRunnerState = {
       ...state,
       status: 'running',

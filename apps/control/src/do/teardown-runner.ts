@@ -28,6 +28,11 @@ const stepKey = (name: string): string => `step:${name}`;
 
 export class TeardownRunner extends DurableObject<Env> {
   async start(state: TeardownRunnerState): Promise<void> {
+    // A fresh start means a new teardown run (the env may have been
+    // re-provisioned since the last one). Drop cached step results so
+    // resources created in between are actually deleted; alarm replays
+    // within this run still reuse the cache.
+    for (const name of TEARDOWN_STEP_ORDER) await this.ctx.storage.delete(stepKey(name));
     const fresh: TeardownRunnerState = { ...state, status: 'running', startedAt: Date.now() };
     await this.ctx.storage.put(STATE_KEY, fresh);
     await this.ctx.storage.setAlarm(Date.now());
