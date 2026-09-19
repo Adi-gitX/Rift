@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import "@/App.css";
 
 // Tiny inline icon helper (Flamingo accents)
-const Icon = ({ d, size = 12, stroke = "#ED462D", fill = "none", sw = 1.5 }) => (
+const Icon = ({ d, size = 12, stroke = "#F6821F", fill = "none", sw = 1.5 }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill={fill} xmlns="http://www.w3.org/2000/svg">
     <path d={d} stroke={stroke} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" />
   </svg>
@@ -29,7 +29,7 @@ const RigLogo = ({ size = 22, color = "#0A0A0A" }) => (
       fill={color}
       letterSpacing="-0.5"
     >raft</text>
-    <rect x="78" y="3" width="6" height="6" fill="#ED462D" />
+    <rect x="78" y="3" width="6" height="6" fill="#F6821F" />
   </svg>
 );
 
@@ -110,9 +110,9 @@ const Surveillance = () => (
       <g transform="translate(95 134)">
         <path d="M0 56 C 50 0, 140 0, 190 56 C 140 112, 50 112, 0 56 Z" fill="rgba(10,10,10,0.6)" stroke="#F0EDE6" strokeOpacity="0.65" strokeWidth="1.2"/>
         <circle cx="95" cy="56" r="32" fill="#0A0A0A" stroke="#F0EDE6" strokeOpacity="0.6" strokeWidth="1.2"/>
-        <circle cx="95" cy="56" r="18" fill="#ED462D"/>
+        <circle cx="95" cy="56" r="18" fill="#F6821F"/>
         <circle cx="100" cy="50" r="5" fill="#0A0A0A"/>
-        <circle cx="95" cy="56" r="32" fill="none" stroke="#ED462D" strokeOpacity="0.4" strokeWidth="0.5">
+        <circle cx="95" cy="56" r="32" fill="none" stroke="#F6821F" strokeOpacity="0.4" strokeWidth="0.5">
           <animate attributeName="r" values="32;36;32" dur="3s" repeatCount="indefinite" />
           <animate attributeName="stroke-opacity" values="0.4;0;0.4" dur="3s" repeatCount="indefinite" />
         </circle>
@@ -146,16 +146,16 @@ const CapIllust = ({ kind }) => {
         <rect width="368" height="224" fill="url(#g1)"/>
         {edges.map(([x1,y1,x2,y2],i) => (
           <g key={i}>
-            <line x1={x1+22} y1={y1} x2={x2-22} y2={y2} stroke="rgba(237,70,45,0.25)" strokeWidth="0.8" />
-            <circle r="2" fill="#ED462D" opacity="0.7">
+            <line x1={x1+22} y1={y1} x2={x2-22} y2={y2} stroke="rgba(246,130,31,0.25)" strokeWidth="0.8" />
+            <circle r="2" fill="#F6821F" opacity="0.7">
               <animateMotion dur={`${3 + i * 0.18}s`} repeatCount="indefinite" path={`M${x1+22},${y1} L${x2-22},${y2}`} />
             </circle>
           </g>
         ))}
         {nodes.map(([x,y], i) => (
           <g key={i}>
-            <rect x={x-22} y={y-9} width="44" height="18" rx="2" fill="rgba(10,10,10,0.92)" stroke={i===0||i===4?"#ED462D":"rgba(240,237,230,0.18)"} strokeOpacity={i===0||i===4 ? 0.85 : 1} strokeWidth="1"/>
-            <circle cx={x-15} cy={y} r="1.5" fill={i===0||i===4 ? "#ED462D" : "rgba(240,237,230,0.4)"} />
+            <rect x={x-22} y={y-9} width="44" height="18" rx="2" fill="rgba(10,10,10,0.92)" stroke={i===0||i===4?"#F6821F":"rgba(240,237,230,0.18)"} strokeOpacity={i===0||i===4 ? 0.85 : 1} strokeWidth="1"/>
+            <circle cx={x-15} cy={y} r="1.5" fill={i===0||i===4 ? "#F6821F" : "rgba(240,237,230,0.4)"} />
             <line x1={x-9} y1={y} x2={x+15} y2={y} stroke="rgba(240,237,230,0.18)" strokeWidth="0.6"/>
           </g>
         ))}
@@ -175,14 +175,14 @@ const CapIllust = ({ kind }) => {
           [200, 140, "env.ChatRoom",  true],
         ].map(([x,y,t,active],i)=>(
           <g key={i}>
-            <rect x={x} y={y} width="100" height="40" fill="rgba(10,10,10,0.92)" stroke={active?"#ED462D":"rgba(240,237,230,0.2)"} strokeOpacity={active?0.85:1} rx="2"/>
-            <circle cx={x+8} cy={y+8} r="2" fill={active?"#ED462D":"rgba(240,237,230,0.4)"}/>
+            <rect x={x} y={y} width="100" height="40" fill="rgba(10,10,10,0.92)" stroke={active?"#F6821F":"rgba(240,237,230,0.2)"} strokeOpacity={active?0.85:1} rx="2"/>
+            <circle cx={x+8} cy={y+8} r="2" fill={active?"#F6821F":"rgba(240,237,230,0.4)"}/>
             <text x={x+18} y={y+12} fontFamily="Chivo Mono" fontSize="7" fill="rgba(240,237,230,0.4)" letterSpacing="0.5">{active ? "● SCOPED" : "○ rewritten"}</text>
             <text x={x+10} y={y+30} fontFamily="Chivo Mono" fontSize="9" fill="rgba(240,237,230,0.75)">{t}</text>
           </g>
         ))}
-        <path d="M160 80 Q 180 80 200 80" stroke="#ED462D" strokeOpacity="0.6" strokeWidth="1.2"/>
-        <path d="M160 160 Q 180 160 200 160" stroke="#ED462D" strokeOpacity="0.6" strokeWidth="1.2"/>
+        <path d="M160 80 Q 180 80 200 80" stroke="#F6821F" strokeOpacity="0.6" strokeWidth="1.2"/>
+        <path d="M160 160 Q 180 160 200 160" stroke="#F6821F" strokeOpacity="0.6" strokeWidth="1.2"/>
         <path d="M110 100 L 110 140" stroke="rgba(240,237,230,0.25)" strokeDasharray="2 2"/>
         <path d="M250 100 L 250 140" stroke="rgba(240,237,230,0.25)" strokeDasharray="2 2"/>
       </svg>
@@ -196,12 +196,12 @@ const CapIllust = ({ kind }) => {
         </g>
         {["PROVISION","UPLOAD","ROUTE"].map((t,i)=>(
           <g key={i}>
-            <rect x={30 + i*110} y="92" width="90" height="40" fill={i===1?"rgba(237,70,45,0.14)":"rgba(10,10,10,0.92)"} stroke={i===1?"#ED462D":"rgba(240,237,230,0.22)"} strokeWidth={i===1?1.2:1} rx="2"/>
-            <text x={75 + i*110} y="116" textAnchor="middle" fontFamily="Chivo Mono" fontWeight="700" fontSize="10" fill={i===1?"#ED462D":"rgba(240,237,230,0.7)"} letterSpacing="2">{t}</text>
+            <rect x={30 + i*110} y="92" width="90" height="40" fill={i===1?"rgba(246,130,31,0.14)":"rgba(10,10,10,0.92)"} stroke={i===1?"#F6821F":"rgba(240,237,230,0.22)"} strokeWidth={i===1?1.2:1} rx="2"/>
+            <text x={75 + i*110} y="116" textAnchor="middle" fontFamily="Chivo Mono" fontWeight="700" fontSize="10" fill={i===1?"#F6821F":"rgba(240,237,230,0.7)"} letterSpacing="2">{t}</text>
             {i<2 && (
               <g>
-                <line x1={120+i*110} y1={112} x2={140+i*110} y2={112} stroke="#ED462D" strokeOpacity="0.6" strokeWidth="1.2"/>
-                <polygon points={`${140+i*110},112 ${134+i*110},109 ${134+i*110},115`} fill="#ED462D" opacity="0.8"/>
+                <line x1={120+i*110} y1={112} x2={140+i*110} y2={112} stroke="#F6821F" strokeOpacity="0.6" strokeWidth="1.2"/>
+                <polygon points={`${140+i*110},112 ${134+i*110},109 ${134+i*110},115`} fill="#F6821F" opacity="0.8"/>
               </g>
             )}
             <text x={75 + i*110} y="76" textAnchor="middle" fontFamily="Chivo Mono" fontSize="7" fill="rgba(240,237,230,0.3)" letterSpacing="1.5">[ {String(i+1).padStart(2,'0')} ]</text>
@@ -222,16 +222,16 @@ const CapIllust = ({ kind }) => {
           { t: "✓ step_ok  provision-resources", c: "#22C55E", y: 60 },
           { t: "↺ propagation_retry  attempt:1", c: "rgba(234,179,8,0.85)", y: 90 },
           { t: "✓ step_ok  upload-script  200", c: "#22C55E", y: 120 },
-          { t: "✓ provision.succeeded · 6.1s", c: "#ED462D", y: 150 },
+          { t: "✓ provision.succeeded · 6.1s", c: "#F6821F", y: 150 },
         ].map((row, i) => (
           <text key={i} x="20" y={row.y} fontFamily="Chivo Mono" fontWeight={i===4?"700":"400"} fontSize="10" fill={row.c}>{row.t}</text>
         ))}
-        <rect x="220" y="36" width="120" height="124" stroke="rgba(237,70,45,0.45)" fill="rgba(237,70,45,0.04)" rx="2"/>
-        <line x1="220" y1="58" x2="340" y2="58" stroke="rgba(237,70,45,0.25)"/>
-        <text x="226" y="52" fontFamily="Chivo Mono" fontWeight="700" fontSize="8" fill="#ED462D" letterSpacing="2">RUNNER</text>
+        <rect x="220" y="36" width="120" height="124" stroke="rgba(246,130,31,0.45)" fill="rgba(246,130,31,0.04)" rx="2"/>
+        <line x1="220" y1="58" x2="340" y2="58" stroke="rgba(246,130,31,0.25)"/>
+        <text x="226" y="52" fontFamily="Chivo Mono" fontWeight="700" fontSize="8" fill="#F6821F" letterSpacing="2">RUNNER</text>
         <text x="280" y="100" textAnchor="middle" fontFamily="Chivo Mono" fontSize="8" fill="rgba(240,237,230,0.45)" letterSpacing="1">alarm-driven DO</text>
         {Array.from({length:4}).map((_,i)=>(
-          <rect key={i} x={232} y={114 + i*10} width={Math.max(20, 90 - i*16)} height="3" fill="rgba(237,70,45,0.55)" opacity={1 - i*0.2}/>
+          <rect key={i} x={232} y={114 + i*10} width={Math.max(20, 90 - i*16)} height="3" fill="rgba(246,130,31,0.55)" opacity={1 - i*0.2}/>
         ))}
       </svg>
     );
@@ -241,14 +241,14 @@ const CapIllust = ({ kind }) => {
       <svg {...common}>
         {[0,1,2].map(i => (
           <g key={i} transform={`translate(${30+i*120} ${50})`}>
-            <rect width="100" height="124" fill="rgba(10,10,10,0.92)" stroke={i===1?"#ED462D":"rgba(240,237,230,0.2)"} strokeOpacity={i===1?0.85:1} rx="2"/>
+            <rect width="100" height="124" fill="rgba(10,10,10,0.92)" stroke={i===1?"#F6821F":"rgba(240,237,230,0.2)"} strokeOpacity={i===1?0.85:1} rx="2"/>
             <rect x="6" y="6" width="88" height="14" fill="rgba(240,237,230,0.04)"/>
-            <circle cx="12" cy="13" r="2.4" fill={i===1 ? "#ED462D" : "rgba(240,237,230,0.3)"}>
+            <circle cx="12" cy="13" r="2.4" fill={i===1 ? "#F6821F" : "rgba(240,237,230,0.3)"}>
               {i===1 && <animate attributeName="opacity" values="1;0.4;1" dur="1.5s" repeatCount="indefinite"/>}
             </circle>
             <text x="20" y="16" fontFamily="Chivo Mono" fontWeight="700" fontSize="6" fill="rgba(240,237,230,0.55)" letterSpacing="1.2">PR·{String(i+1).padStart(2,'0')}</text>
             {Array.from({length:6}).map((_,j)=>(
-              <line key={j} x1="10" y1={36+j*12} x2={Math.max(20, 80-j*8)} y2={36+j*12} stroke={j===i?"#ED462D":"rgba(240,237,230,0.2)"} strokeOpacity={j===i?0.6:1} strokeWidth="0.6"/>
+              <line key={j} x1="10" y1={36+j*12} x2={Math.max(20, 80-j*8)} y2={36+j*12} stroke={j===i?"#F6821F":"rgba(240,237,230,0.2)"} strokeOpacity={j===i?0.6:1} strokeWidth="0.6"/>
             ))}
             <text x="50" y="116" textAnchor="middle" fontFamily="Chivo Mono" fontSize="6" fill="rgba(240,237,230,0.3)" letterSpacing="1">{i===1 ? "READY" : i===0 ? "torn down" : "provisioning"}</text>
           </g>
@@ -264,13 +264,13 @@ const CapIllust = ({ kind }) => {
         {Array.from({length:11}).map((_,i)=> <line key={i} x1="0" y1={20*i+12} x2="368" y2={20*i+12} />)}
       </g>
       <text x="184" y="98" textAnchor="middle" fontFamily="YD Yoonche, Inter" fontWeight="700" fontSize="56" fill="#F0EDE6" letterSpacing="-2">86</text>
-      <text x="184" y="124" textAnchor="middle" fontFamily="Chivo Mono" fontWeight="700" fontSize="10" fill="#ED462D" letterSpacing="3">TESTS · ALL GREEN</text>
+      <text x="184" y="124" textAnchor="middle" fontFamily="Chivo Mono" fontWeight="700" fontSize="10" fill="#F6821F" letterSpacing="3">TESTS · ALL GREEN</text>
       <g>
         <line x1="60" y1="170" x2="308" y2="170" stroke="rgba(240,237,230,0.18)" strokeWidth="1"/>
         {Array.from({length:30}).map((_,i)=>{
           const h = Math.max(4, Math.abs(Math.sin(i*0.7)*22 + Math.cos(i*1.1)*8) + 6);
           const x = 60+i*8.5;
-          return <line key={i} x1={x} y1={170} x2={x} y2={170-h} stroke="#ED462D" strokeOpacity={0.4 + (i%5)*0.12} strokeWidth="2.4"/>;
+          return <line key={i} x1={x} y1={170} x2={x} y2={170-h} stroke="#F6821F" strokeOpacity={0.4 + (i%5)*0.12} strokeWidth="2.4"/>;
         })}
       </g>
       <text x="60" y="195" fontFamily="Chivo Mono" fontSize="7" fill="rgba(240,237,230,0.35)" letterSpacing="1.5">vitest-pool-workers</text>
@@ -334,7 +334,7 @@ const NetworkDiagram = () => (
     {/* RAFT-CONTROL box */}
     <rect x="385" y="232" width="230" height="156" fill="rgba(10,10,10,0.85)" stroke="rgba(240,237,230,0.32)" strokeWidth="1"/>
     <text x="500" y="270" textAnchor="middle" fontFamily="Chivo Mono" fontWeight="700" fontSize="20" fill="#F0EDE6" letterSpacing="3">raft-control</text>
-    <text x="500" y="296" textAnchor="middle" fontFamily="Chivo Mono" fontSize="10" fill="#ED462D" letterSpacing="2">● 5-STEP ALARM RUNNER</text>
+    <text x="500" y="296" textAnchor="middle" fontFamily="Chivo Mono" fontSize="10" fill="#F6821F" letterSpacing="2">● 5-STEP ALARM RUNNER</text>
     <line x1="402" y1="335" x2="598" y2="335" stroke="rgba(240,237,230,0.10)"/>
     <text x="425" y="370" textAnchor="middle" fontFamily="Chivo Mono" fontSize="10" fill="rgba(240,237,230,0.35)" letterSpacing="1.5">DOs</text>
     <text x="500" y="370" textAnchor="middle" fontFamily="Chivo Mono" fontSize="10" fill="rgba(240,237,230,0.35)" letterSpacing="1.5">D1</text>
@@ -448,10 +448,10 @@ const Stepper = () => {
   const [active, setActive] = useState(0);
   const steps = [
     {
-      n: "Step 01", title: "Install the GitHub App.\nDrop in a .raft.json.",
+      n: "Step 01", title: "Install the GitHub App.\nKeep your wrangler.jsonc.",
       body: [
         "One-click GitHub App install on the repos you want previews for. The customer-side `raft-bundle.yml` GitHub Action ships with the app — it builds the worker bundle and POSTs it to Raft on every PR.",
-        "The .raft.json declares which bindings (D1, KV, Queue, R2, DOs) Raft should isolate per PR. Sane defaults — most projects don't need to touch it.",
+        "Raft reads d1_databases from your wrangler.jsonc at the PR head and forks that database per PR; migrations/*.sql are applied to the fork. Nothing else to configure.",
       ],
       card: {
         title: "Install footprint",

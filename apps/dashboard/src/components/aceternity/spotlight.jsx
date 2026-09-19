@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
  * Subtle spotlight gradient anchored to a corner — Aceternity style.
  * Pure CSS, no JS, decorative only.
  */
-export const Spotlight = ({ className, fill = "#ED462D" }) => (
+export const Spotlight = ({ className, fill = "#F6821F" }) => (
   <div
     aria-hidden
     className={cn("pointer-events-none absolute inset-0 overflow-hidden", className)}

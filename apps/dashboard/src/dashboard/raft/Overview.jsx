@@ -88,7 +88,7 @@ const RatesPanel = ({ stats }) => {
   const provs = (t.provisions_succeeded ?? 0) + (t.provisions_failed ?? 0);
   const successRate = provs === 0 ? null : Math.round(((t.provisions_succeeded ?? 0) / provs) * 100);
   return (
-    <div className="grid grid-cols-3 gap-4 px-10">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 px-10">
       <div className="border border-white/[0.06] rounded p-4">
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.1em] text-white/45 d-mono">
           <CheckCircle2 size={12} /> Success rate
@@ -143,7 +143,7 @@ const FreeTierGauges = ({ stats }) => {
     );
   };
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 xl:grid-cols-2 lg:grid-cols-1 gap-2">
       <Gauge label="Workers" slot={ft.workers} />
       <Gauge label="D1 dbs"  slot={ft.d1_databases} />
       <Gauge label="KV ns"   slot={ft.kv_namespaces} />
@@ -227,9 +227,9 @@ const RecentRows = ({ prs, navigate }) => (
           <button
             key={pr.id}
             onClick={() => navigate(`/dashboard/pr/${encodeURIComponent(pr.id)}`)}
-            className="grid w-full grid-cols-[16px_minmax(0,1fr)_180px_120px_100px_14px] items-center gap-4 px-2 py-3.5 text-left hover:bg-white/[0.02] transition-colors"
+            className="grid w-full grid-cols-[16px_minmax(0,1fr)_120px_90px_80px_14px] md:grid-cols-[16px_minmax(0,1fr)_180px_120px_100px_14px] items-center gap-4 px-2 py-3.5 text-left hover:bg-white/[0.02] transition-colors"
           >
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#ED462D] shadow-[0_0_6px_rgba(237,70,45,0.55)]" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#F6821F] shadow-[0_0_6px_rgba(246,130,31,0.55)]" />
             <span className="text-[13.5px] font-medium text-white truncate">
               {pr.repoId}<span className="text-white/35">#</span>{pr.prNumber}
             </span>
@@ -252,7 +252,7 @@ const IntegrationsBlock = () => (
         Why each <ExternalLink size={12} />
       </a>
     </div>
-    <div className="grid grid-cols-6 border border-white/[0.06] rounded">
+    <div className="grid grid-cols-3 md:grid-cols-6 border border-white/[0.06] rounded">
       {INTEGRATIONS.map((it, i) => {
         const Logo = it.Logo;
         return (
@@ -309,7 +309,7 @@ export const RaftOverview = () => {
 
       {/* Sparkline + state distribution donut + free-tier gauges */}
       <section className="mt-10 px-10">
-        <div className="grid grid-cols-[2fr_1fr_1fr] gap-5">
+        <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr_1fr] gap-5">
           <div className="border border-white/[0.06] rounded p-5">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-white/65">Last 7 days</h2>

@@ -83,7 +83,7 @@ export const RaftRepos = () => {
               href={installUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded h-8 px-3 text-[12px] font-medium border border-[#ED462D]/40 text-white bg-[#ED462D]/10 hover:bg-[#ED462D]/20 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded h-8 px-3 text-[12px] font-medium border border-[#F6821F]/40 text-white bg-[#F6821F]/10 hover:bg-[#F6821F]/20 transition-colors"
             >
               + Install on a repo
             </a>
@@ -110,7 +110,7 @@ export const RaftRepos = () => {
               href={installUrl}
               target="_blank"
               rel="noreferrer"
-              className="mt-4 inline-flex items-center gap-1.5 rounded h-9 px-4 text-[13px] font-medium border border-[#ED462D]/40 text-white bg-[#ED462D]/10 hover:bg-[#ED462D]/20 transition-colors"
+              className="mt-4 inline-flex items-center gap-1.5 rounded h-9 px-4 text-[13px] font-medium border border-[#F6821F]/40 text-white bg-[#F6821F]/10 hover:bg-[#F6821F]/20 transition-colors"
             >
               Install Raft on a repo →
             </a>
@@ -259,7 +259,7 @@ export const RaftRepoDetail = () => {
                     onClick={() => navigate(`/dashboard/pr/${encodeURIComponent(pr.id)}`)}
                     className="grid w-full grid-cols-[16px_70px_minmax(0,1fr)_120px_100px_14px] items-center gap-4 px-4 py-3.5 text-left border-b border-white/[0.04] last:border-b-0 hover:bg-white/[0.02]"
                   >
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#ED462D]" />
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#F6821F]" />
                     <span className="d-mono text-[12px] text-white/55">PR #{pr.prNumber}</span>
                     <StatusBadge status={pr.state} tone={stateTone(pr.state)} />
                     <span className="d-mono text-[12px] text-white/55">{pr.headSha?.slice(0, 7) ?? "—"}</span>
@@ -314,7 +314,7 @@ export const RaftRepoDetail = () => {
               href={`https://github.com/${repo.fullName}`}
               target="_blank"
               rel="noreferrer"
-              className="d-mono text-[12px] text-[#ED462D] hover:text-[#ff7a5c] inline-flex items-center gap-1"
+              className="d-mono text-[12px] text-[#F6821F] hover:text-[#ff7a5c] inline-flex items-center gap-1"
             >
               github.com/{repo.fullName}
               <ExternalLink size={11} />

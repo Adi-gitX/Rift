@@ -42,7 +42,7 @@ const WorkerCard = ({ name, role, url, status, httpStatus, version }) => (
     <div className="flex items-center gap-3 text-[10.5px] text-white/45 d-mono">
       {httpStatus !== undefined && <span>http {httpStatus}</span>}
       {version && <span>v {version}</span>}
-      <a href={url} target="_blank" rel="noreferrer" className="ml-auto text-[#ED462D] hover:text-[#ff7a5c] inline-flex items-center gap-1">
+      <a href={url} target="_blank" rel="noreferrer" className="ml-auto text-[#F6821F] hover:text-[#ff7a5c] inline-flex items-center gap-1">
         open <ExternalLink size={11} />
       </a>
     </div>
@@ -221,7 +221,7 @@ export const RaftSystem = () => {
             {[
               { name: "RepoCoordinator",  desc: "One per (installation, repo). State machine + dispatch into ProvisionRunner." },
               { name: "PrEnvironment",    desc: "One per PR. Single-writer for state transitions. Holds log buffer." },
-              { name: "ProvisionRunner",  desc: "Alarm-driven 5-step machine. Idempotent on replay. Backoff 1/2/4/8/16s." },
+              { name: "ProvisionRunner",  desc: "Alarm-driven 9-step machine: detect → fork D1 → apply migrations → diff schema → upload. Idempotent on replay, backoff 1/2/4/8/16s." },
               { name: "TeardownRunner",   desc: "Alarm-driven 9-step destruction machine. Idempotent. CF 404 = already gone." },
               { name: "LogTail",          desc: "Hibernatable WebSocket fan-out + ring buffer: runner step events stream to open dashboard tabs." },
             ].map((d) => (

@@ -113,7 +113,7 @@ export const SidebarLink = ({ link, className, active, ...props }) => (
   >
     {/* active accent bar */}
     {active && (
-      <span aria-hidden className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-[2px] rounded-r bg-[#ED462D]" />
+      <span aria-hidden className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-[2px] rounded-r bg-[#F6821F]" />
     )}
     <span className="shrink-0 w-5 h-5 flex items-center justify-center">{link.icon}</span>
     <AnimatedLabel className="text-[13px] font-medium">{link.label}</AnimatedLabel>

@@ -41,79 +41,83 @@ import "@/dashboard/raft-shell.css";
 
 /* ───────────── Sidebar ───────────── */
 
-const NavBtn = ({ item, active, onClick }) => (
+const NavBtn = ({ item, active, onClick, collapsed }) => (
   <button
     type="button"
     onClick={onClick}
-    className={cn("fc-nav-btn", active && "active")}
+    className={cn("fc-nav-btn", active && "active", collapsed && "collapsed")}
     data-testid={`nav-${item.key}`}
+    title={collapsed ? item.label : undefined}
   >
     <span className="shrink-0 text-[#a0a0a0]">{item.icon}</span>
-    <span className="flex-1 truncate">{item.label}</span>
-    {item.badge && <span className="fc-pill">{item.badge}</span>}
+    {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+    {!collapsed && item.badge && <span className="fc-pill">{item.badge}</span>}
   </button>
 );
 
-const SectionLabel = ({ children }) => (
-  <div className="fc-nav-section">{children}</div>
-);
+const SectionLabel = ({ children, collapsed }) =>
+  collapsed ? <div className="fc-nav-section-rule" /> : <div className="fc-nav-section">{children}</div>;
+
+export const SIDEBAR_W = 256;
+export const SIDEBAR_W_COLLAPSED = 64;
 
 const RaftMark = () => (
   // 22×24 SVG matching the original flame footprint so layout stays unchanged.
   <svg width="22" height="24" viewBox="0 0 22 24" fill="none" aria-label="raft">
     {/* Three nested squares = per-PR isolation */}
-    <rect x="2"  y="2"  width="18" height="18" stroke="#ED462D" strokeWidth="1.5" fill="none" />
-    <rect x="6"  y="6"  width="10" height="10" stroke="#ED462D" strokeWidth="1.5" fill="none" opacity="0.65" />
-    <rect x="9.5" y="9.5" width="3"  height="3"  fill="#ED462D" />
+    <rect x="2"  y="2"  width="18" height="18" stroke="#F6821F" strokeWidth="1.5" fill="none" />
+    <rect x="6"  y="6"  width="10" height="10" stroke="#F6821F" strokeWidth="1.5" fill="none" opacity="0.65" />
+    <rect x="9.5" y="9.5" width="3"  height="3"  fill="#F6821F" />
   </svg>
 );
 
-const Sidebar = ({ active, onNav, sessionEmail }) => (
+const Sidebar = ({ active, onNav, sessionEmail, collapsed, onToggle }) => (
   <aside
-    className="fixed left-0 top-0 z-30 flex h-screen w-[256px] flex-col border-r border-[#1f1f1f] bg-[#0a0a0a]"
+    className="fixed left-0 top-0 z-30 flex h-screen flex-col border-r border-[#1f1f1f] bg-[#0a0a0a] transition-[width] duration-150"
+    style={{ width: collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W }}
     data-testid="dashboard-sidebar"
   >
     {/* Brand */}
-    <div className="flex h-[64px] items-center px-4 border-b border-[#1f1f1f]">
+    <div className={cn("flex h-[64px] items-center border-b border-[#1f1f1f]", collapsed ? "justify-center px-0" : "px-4")}>
       <Link to="/" className="flex items-center gap-2 group" data-testid="sidebar-home-link">
-        <span className="inline-flex h-7 w-7 items-center justify-center text-[#ED462D]">
+        <span className="inline-flex h-7 w-7 items-center justify-center text-[#F6821F]">
           <RaftMark />
         </span>
-        <span className="text-[17px] font-semibold tracking-tight text-white">raft</span>
-        <span className="ml-1 text-[10px] font-mono text-white/30">control plane</span>
+        {!collapsed && <span className="text-[17px] font-semibold tracking-tight text-white">raft</span>}
+        {!collapsed && <span className="ml-1 text-[10px] font-mono text-white/30">control plane</span>}
       </Link>
     </div>
 
     {/* Nav */}
-    <nav className="flex-1 overflow-y-auto px-3 pt-4 pb-2">
-      <NavBtn item={NAV_OVERVIEW} active={active === "overview"} onClick={() => onNav("overview")} />
+    <nav className={cn("flex-1 overflow-y-auto pt-4 pb-2", collapsed ? "px-2" : "px-3")}>
+      <NavBtn item={NAV_OVERVIEW} active={active === "overview"} onClick={() => onNav("overview")} collapsed={collapsed} />
 
-      <SectionLabel>Provisioning</SectionLabel>
+      <SectionLabel collapsed={collapsed}>Provisioning</SectionLabel>
       <div className="flex flex-col gap-0.5">
         {NAV_PLAYGROUND.map((it) => (
-          <NavBtn key={it.key} item={it} active={active === it.key} onClick={() => onNav(it.key)} />
+          <NavBtn key={it.key} item={it} active={active === it.key} onClick={() => onNav(it.key)} collapsed={collapsed} />
         ))}
       </div>
 
-      <SectionLabel>Telemetry</SectionLabel>
+      <SectionLabel collapsed={collapsed}>Telemetry</SectionLabel>
       <div className="flex flex-col gap-0.5">
         {NAV_RESEARCH.map((it) => (
-          <NavBtn key={it.key} item={it} active={active === it.key} onClick={() => onNav(it.key)} />
+          <NavBtn key={it.key} item={it} active={active === it.key} onClick={() => onNav(it.key)} collapsed={collapsed} />
         ))}
       </div>
 
-      <SectionLabel>Operator</SectionLabel>
+      <SectionLabel collapsed={collapsed}>Operator</SectionLabel>
       <div className="flex flex-col gap-0.5">
         {NAV_ACCOUNT.map((it) => (
-          <NavBtn key={it.key} item={it} active={active === it.key} onClick={() => onNav(it.key)} />
+          <NavBtn key={it.key} item={it} active={active === it.key} onClick={() => onNav(it.key)} collapsed={collapsed} />
         ))}
       </div>
     </nav>
 
     {/* Footer */}
-    <div className="border-t border-[#1f1f1f] px-3 pt-3 pb-3 flex flex-col gap-1">
+    <div className={cn("border-t border-[#1f1f1f] pt-3 pb-3 flex flex-col gap-1", collapsed ? "px-2 items-center" : "px-3")}>
       {NAV_FOOTER.map((it) => (
-        <NavBtn key={it.key} item={it} active={active === it.key} onClick={() => onNav(it.key)} />
+        <NavBtn key={it.key} item={it} active={active === it.key} onClick={() => onNav(it.key)} collapsed={collapsed} />
       ))}
 
       <DropdownMenu>
@@ -122,10 +126,10 @@ const Sidebar = ({ active, onNav, sessionEmail }) => (
             className="flex items-center gap-2.5 rounded-md px-2 py-2 text-left hover:bg-white/[0.04]"
             data-testid="sidebar-user"
           >
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#ED462D] to-[#a13325] text-[10.5px] font-semibold text-white">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#F6821F] to-[#C2410C] text-[10.5px] font-semibold text-white">
               {(sessionEmail ?? "?").slice(0, 2).toUpperCase()}
             </span>
-            <span className="flex-1 truncate text-[12.5px] text-white">{sessionEmail ?? "—"}</span>
+            {!collapsed && <span className="flex-1 truncate text-[12.5px] text-white">{sessionEmail ?? "—"}</span>}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="top" className="w-[220px] border-[#2a2a2a] bg-[#0e0e0e] text-white/85">
@@ -147,12 +151,13 @@ const Sidebar = ({ active, onNav, sessionEmail }) => (
       </DropdownMenu>
 
       <button
-        onClick={() => toast.message("Sidebar collapse coming soon")}
+        onClick={onToggle}
         className="mt-1 flex items-center gap-2 rounded-md px-2 py-2 text-left text-[12.5px] text-[#a0a0a0] hover:bg-white/[0.04] hover:text-white"
         data-testid="sidebar-collapse"
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
-        <ChevronsLeft size={15} />
-        <span>Collapse</span>
+        <ChevronsLeft size={15} className={cn("transition-transform", collapsed && "rotate-180")} />
+        {!collapsed && <span>Collapse</span>}
       </button>
     </div>
   </aside>
@@ -160,10 +165,10 @@ const Sidebar = ({ active, onNav, sessionEmail }) => (
 
 /* ───────────── Top Header ───────────── */
 
-const TopHeader = ({ health, accountId }) => (
+const TopHeader = ({ health, accountId, sidebarWidth }) => (
   <header
-    className="fixed top-0 right-0 z-20 flex h-[64px] items-center justify-between gap-3 border-b border-[#1f1f1f] bg-[#0a0a0a] pl-6 pr-6"
-    style={{ left: 256 }}
+    className="fixed top-0 right-0 z-20 flex h-[64px] items-center justify-between gap-3 border-b border-[#1f1f1f] bg-[#0a0a0a] pl-6 pr-6 transition-[left] duration-150"
+    style={{ left: sidebarWidth }}
   >
     {/* Account / installation context */}
     <DropdownMenu>
@@ -232,11 +237,11 @@ const TopHeader = ({ health, accountId }) => (
       </button>
       <button
         className="fc-btn fc-btn-ghost"
-        onClick={() => toast.message("⌘K — search shipping in v2")}
+        onClick={() => window.open("https://github.com/Adi-gitX/Rift#readme", "_blank")}
         data-testid="header-help"
       >
         <HelpCircle size={14} strokeWidth={1.75} />
-        Help
+        Docs
       </button>
       <a
         href="https://github.com/Adi-gitX/Rift"
@@ -257,6 +262,20 @@ const TopHeader = ({ health, accountId }) => (
 export const RaftShell = ({ children, active = "overview", onNav = () => {} }) => {
   const [sessionEmail, setSessionEmail] = useState(null);
   const [accountId, setAccountId] = useState(null);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem("raft.sidebar.collapsed");
+      if (saved !== null) return saved === "1";
+    } catch {}
+    return typeof window !== "undefined" && window.innerWidth < 1100;
+  });
+  const toggleCollapsed = () => {
+    setCollapsed((v) => {
+      try { window.localStorage.setItem("raft.sidebar.collapsed", v ? "0" : "1"); } catch {}
+      return !v;
+    });
+  };
+  const sidebarWidth = collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W;
   const [health, setHealth] = useState({ control: "ok", dispatcher: "?", tail: "?" });
 
   useEffect(() => {
@@ -282,11 +301,11 @@ export const RaftShell = ({ children, active = "overview", onNav = () => {} }) =
   return (
     <div className="fc-shell relative flex min-h-screen w-full bg-[#0a0a0a]">
       <span className="fc-bg-glow" aria-hidden />
-      <Sidebar active={active} onNav={onNav} sessionEmail={sessionEmail} />
-      <TopHeader health={health} accountId={accountId} />
+      <Sidebar active={active} onNav={onNav} sessionEmail={sessionEmail} collapsed={collapsed} onToggle={toggleCollapsed} />
+      <TopHeader health={health} accountId={accountId} sidebarWidth={sidebarWidth} />
       <main
-        className="relative z-10 flex-1 min-w-0"
-        style={{ marginLeft: 256, paddingTop: 64 }}
+        className="relative z-10 flex-1 min-w-0 transition-[margin] duration-150"
+        style={{ marginLeft: sidebarWidth, paddingTop: 64 }}
         data-testid="dashboard-main"
       >
         {children}

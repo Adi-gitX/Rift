@@ -14,7 +14,7 @@ const PriorityDot = ({ tone }) => (
     className={
       "inline-block h-1.5 w-1.5 rounded-full " +
       (tone === "high"
-        ? "bg-[#ED462D] shadow-[0_0_6px_rgba(237,70,45,0.55)]"
+        ? "bg-[#F6821F] shadow-[0_0_6px_rgba(246,130,31,0.55)]"
         : tone === "progress"
           ? "bg-[#EAB308]"
           : tone === "done"
@@ -52,7 +52,7 @@ const Tab = ({ value, current, onClick, label, count }) => (
     className={
       "relative flex h-9 items-center gap-1.5 px-1 text-[13px] font-medium transition-colors " +
       (current === value ? "text-white" : "text-white/45 hover:text-white/75") +
-      " after:absolute after:bottom-[-13px] after:left-0 after:right-0 after:h-[2px] after:bg-[#ED462D] after:opacity-0 " +
+      " after:absolute after:bottom-[-13px] after:left-0 after:right-0 after:h-[2px] after:bg-[#F6821F] after:opacity-0 " +
       (current === value ? "after:opacity-100" : "")
     }
     data-testid={`tab-${value}`}

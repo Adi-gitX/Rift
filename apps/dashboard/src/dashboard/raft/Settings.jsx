@@ -1,20 +1,24 @@
 /**
- * Raft Settings — operator session, installations, .raft.json template,
+ * Raft Settings — operator session, installations, wrangler D1 template,
  * raft-bundle.yml GitHub Action snippet. Themed to match the RaftShell.
  */
 import React, { useEffect, useState } from "react";
 import { Copy, Check, ExternalLink, Loader2 } from "lucide-react";
 import { api, fmtDate } from "@/dashboard/raft/api";
 
-const RAFT_JSON_TEMPLATE = `{
-  "version": 1,
-  "worker_path": ".",
-  "bundle_command": "wrangler deploy --dry-run --outdir=dist",
-  "bindings_to_isolate": ["DB", "KV", "QUEUE", "BUCKET"],
-  "do_classes_to_shard": ["ChatRoom", "Counter"],
-  "max_d1_export_size_mb": 100,
-  "ttl_days": 7
-}`;
+const WRANGLER_D1_TEMPLATE = `// wrangler.jsonc — Raft reads d1_databases[0] at the PR head SHA.
+{
+  "name": "my-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-29",
+  "d1_databases": [
+    { "binding": "DB", "database_name": "prod", "database_id": "<your-prod-d1-uuid>",
+      "migrations_dir": "migrations" }   // optional, default "migrations"
+  ]
+}
+// migrations/0001_init.sql, 0002_add_posts.sql … — same files you apply with
+// \`wrangler d1 migrations apply\`. On every PR Raft forks "prod", runs only the
+// files not yet in d1_migrations on the fork, and comments the schema diff.`;
 
 const GH_ACTION_SNIPPET = `name: raft-bundle
 on:
@@ -176,7 +180,7 @@ export const RaftSettings = () => {
                 href={me.githubApp.installUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[11px] text-[#ED462D] hover:text-[#ff7a5c] inline-flex items-center gap-1 d-mono"
+                className="text-[11px] text-[#F6821F] hover:text-[#ff7a5c] inline-flex items-center gap-1 d-mono"
               >
                 + Install on another repo ↗
               </a>
@@ -187,7 +191,7 @@ export const RaftSettings = () => {
               <div className="px-4 py-5 text-[12.5px] text-white/55">
                 No active installations.
                 {me?.githubApp?.installUrl && (
-                  <a href={me.githubApp.installUrl} target="_blank" rel="noreferrer" className="ml-2 text-[#ED462D] hover:text-[#ff7a5c]">Install Raft →</a>
+                  <a href={me.githubApp.installUrl} target="_blank" rel="noreferrer" className="ml-2 text-[#F6821F] hover:text-[#ff7a5c]">Install Raft →</a>
                 )}
               </div>
             ) : (
@@ -211,11 +215,11 @@ export const RaftSettings = () => {
         </section>
 
         <section>
-          <h2 className="mb-3 text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">.raft.json template</h2>
+          <h2 className="mb-3 text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Database branching setup</h2>
           <p className="text-[12px] text-white/55 mb-3">
-            Drop this in the root of your repo. Defaults are sane — most projects don't need to touch it.
+            Declare your production D1 in wrangler.jsonc and keep migrations as SQL files. That is all Raft needs to fork the database per PR and preview migrations.
           </p>
-          <CodeBlock label=".raft.json">{RAFT_JSON_TEMPLATE}</CodeBlock>
+          <CodeBlock label="wrangler.jsonc">{WRANGLER_D1_TEMPLATE}</CodeBlock>
         </section>
 
         <section>

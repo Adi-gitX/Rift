@@ -4,7 +4,7 @@
 :root {
   --cod-gray: #0A0A0A;
   --pampas: #F0EDE6;
-  --flamingo: #ED462D;
+  --flamingo: #F6821F;
   --meadow: #22C55E;
   --pampas-04: rgba(240,237,230,0.04);
   --pampas-06: rgba(240,237,230,0.06);
@@ -20,9 +20,9 @@
   --pampas-50: rgba(240,237,230,0.50);
   --pampas-65: rgba(240,237,230,0.65);
   --pampas-75: rgba(240,237,230,0.75);
-  --flame-12: rgba(237,70,45,0.12);
-  --flame-20: rgba(237,70,45,0.20);
-  --flame-40: rgba(237,70,45,0.40);
+  --flame-12: rgba(246,130,31,0.12);
+  --flame-20: rgba(246,130,31,0.20);
+  --flame-40: rgba(246,130,31,0.40);
   --container: 1200px;
   --mx: 50vw;
   --my: 50vh;
@@ -155,13 +155,13 @@ body { font-family: "Instrument Sans", sans-serif; }
   background: var(--flamingo);
   display: inline-block;
   position: relative;
-  box-shadow: 0 0 0 0 rgba(237,70,45,0.6);
+  box-shadow: 0 0 0 0 rgba(246,130,31,0.6);
   animation: badge-pulse 1.6s ease-out infinite;
 }
 @keyframes badge-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(237,70,45,0.7); }
-  70%  { box-shadow: 0 0 0 8px rgba(237,70,45,0);   }
-  100% { box-shadow: 0 0 0 0   rgba(237,70,45,0);   }
+  0%   { box-shadow: 0 0 0 0   rgba(246,130,31,0.7); }
+  70%  { box-shadow: 0 0 0 8px rgba(246,130,31,0);   }
+  100% { box-shadow: 0 0 0 0   rgba(246,130,31,0);   }
 }
 
 /* ============== BUTTONS (chamfer) ============== */
@@ -204,9 +204,9 @@ body { font-family: "Instrument Sans", sans-serif; }
 .btn-flame {
   background: var(--flamingo);
   color: var(--cod-gray);
-  box-shadow: 0 0 40px rgba(237,70,45,0.35), 0 4px 16px rgba(237,70,45,0.25);
+  box-shadow: 0 0 40px rgba(246,130,31,0.35), 0 4px 16px rgba(246,130,31,0.25);
 }
-.btn-flame:hover { background: #ff5a3d; box-shadow: 0 0 70px rgba(237,70,45,0.55), 0 6px 22px rgba(237,70,45,0.35); }
+.btn-flame:hover { background: #F38020; box-shadow: 0 0 70px rgba(246,130,31,0.55), 0 6px 22px rgba(246,130,31,0.35); }
 .btn-lg { padding: 16px 32px; font-size: 13.6px; height: 52px; }
 .btn-xl { padding: 32px 48px; font-size: 20.8px; --chamfer: 14px; }
 .btn-arrow { display: inline-flex; }
@@ -507,7 +507,7 @@ body { font-family: "Instrument Sans", sans-serif; }
   transition: background .25s ease;
   min-height: 240px;
 }
-.problem-card:hover { background: rgba(237,70,45,0.04); }
+.problem-card:hover { background: rgba(246,130,31,0.04); }
 .problem-card.br { border-right: 1px solid var(--pampas-14); }
 .problem-card.bb { border-bottom: 1px solid var(--pampas-14); }
 .prob-head {
@@ -569,9 +569,9 @@ body { font-family: "Instrument Sans", sans-serif; }
 .shader-bar {
   position: absolute;
   display: block;
-  background: linear-gradient(90deg, transparent 0%, #ED462D 12%, #ff5a3d 50%, #ED462D 88%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, #F6821F 12%, #F38020 50%, #F6821F 88%, transparent 100%);
   filter: blur(0.5px);
-  box-shadow: 0 0 18px rgba(237,70,45,0.45);
+  box-shadow: 0 0 18px rgba(246,130,31,0.45);
   animation-name: shader-glide;
   animation-iteration-count: infinite;
   animation-timing-function: linear;
@@ -772,13 +772,13 @@ body { font-family: "Instrument Sans", sans-serif; }
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 50% 0%, rgba(237,70,45,0.10), transparent 60%);
+  background: radial-gradient(circle at 50% 0%, rgba(246,130,31,0.10), transparent 60%);
   opacity: 0;
   transition: opacity .35s ease;
   pointer-events: none;
   z-index: 0;
 }
-.cap-card:hover { background: rgba(237,70,45,0.025); }
+.cap-card:hover { background: rgba(246,130,31,0.025); }
 .cap-card:hover::before { opacity: 1; }
 .cap-card > * { position: relative; z-index: 1; }
 .cap-card:nth-child(3n) { border-right: 0; }
@@ -878,7 +878,7 @@ body { font-family: "Instrument Sans", sans-serif; }
   transition: background .25s ease;
 }
 .how-step:last-child { border-bottom: 0; }
-.how-step:hover { background: rgba(237,70,45,0.03); }
+.how-step:hover { background: rgba(246,130,31,0.03); }
 .how-step-row {
   display: flex;
   flex-direction: column;
@@ -960,11 +960,11 @@ body { font-family: "Instrument Sans", sans-serif; }
   border-radius: 4px;
   padding: 0;
   backdrop-filter: blur(8px);
-  box-shadow: 0 0 80px rgba(237,70,45,0.15), inset 0 0 40px rgba(237,70,45,0.04);
+  box-shadow: 0 0 80px rgba(246,130,31,0.15), inset 0 0 40px rgba(246,130,31,0.04);
 }
 .how-card-title {
   padding: 14px 24px;
-  border-bottom: 1px solid rgba(237,70,45,0.25);
+  border-bottom: 1px solid rgba(246,130,31,0.25);
   font-family: "Chivo Mono", monospace;
   font-weight: 700;
   font-size: 11px;
@@ -1131,7 +1131,7 @@ body { font-family: "Instrument Sans", sans-serif; }
   height: 6px;
   background: var(--flamingo);
   border-radius: 3px;
-  box-shadow: 0 0 8px rgba(237,70,45,0.4);
+  box-shadow: 0 0 8px rgba(246,130,31,0.4);
   animation: blink 1.4s infinite;
 }
 @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0.3; } }
@@ -1183,7 +1183,7 @@ body { font-family: "Instrument Sans", sans-serif; }
   height: 4px;
   background: var(--flamingo);
   border-radius: 2px;
-  box-shadow: 0 0 6px rgba(237,70,45,0.4);
+  box-shadow: 0 0 6px rgba(246,130,31,0.4);
 }
 .model-tag { color: var(--flamingo); opacity: 0.5; }
 
@@ -1194,7 +1194,7 @@ body { font-family: "Instrument Sans", sans-serif; }
   transition: background .25s ease;
 }
 .faq-item:last-child { border-bottom: 1px solid var(--pampas-14); }
-.faq-item:hover { background: rgba(237,70,45,0.025); }
+.faq-item:hover { background: rgba(246,130,31,0.025); }
 .faq-row {
   display: flex;
   align-items: center;
@@ -1358,14 +1358,14 @@ body { font-family: "Instrument Sans", sans-serif; }
 }
 .cta-headline.glitch {
   text-shadow:
-    0.5px 0 0 rgba(237,70,45,0.25),
+    0.5px 0 0 rgba(246,130,31,0.25),
     -0.5px 0 0 rgba(43,79,255,0.25);
   animation: glitch-head 4s infinite ease-in-out;
 }
 @keyframes glitch-head {
-  0%, 96%, 100% { text-shadow: 0.5px 0 0 rgba(237,70,45,0.25), -0.5px 0 0 rgba(43,79,255,0.25); }
-  97% { text-shadow: 2px 0 0 rgba(237,70,45,0.4), -2px 0 0 rgba(43,79,255,0.4); transform: translate(1px, 0); }
-  98% { text-shadow: -2px 0 0 rgba(237,70,45,0.4), 2px 0 0 rgba(43,79,255,0.4); transform: translate(-1px, 0); }
+  0%, 96%, 100% { text-shadow: 0.5px 0 0 rgba(246,130,31,0.25), -0.5px 0 0 rgba(43,79,255,0.25); }
+  97% { text-shadow: 2px 0 0 rgba(246,130,31,0.4), -2px 0 0 rgba(43,79,255,0.4); transform: translate(1px, 0); }
+  98% { text-shadow: -2px 0 0 rgba(246,130,31,0.4), 2px 0 0 rgba(43,79,255,0.4); transform: translate(-1px, 0); }
 }
 
 /* ============== FOOTER ============== */
@@ -1462,7 +1462,7 @@ body { font-family: "Instrument Sans", sans-serif; }
   height: 6px;
   background: var(--flamingo);
   border-radius: 50%;
-  box-shadow: 0 0 8px rgba(237,70,45,0.6);
+  box-shadow: 0 0 8px rgba(246,130,31,0.6);
   animation: pulse-dot 2s infinite;
 }
 @keyframes pulse-dot { 50% { opacity: 0.5; } }
@@ -1502,7 +1502,7 @@ html { scroll-behavior: smooth; }
 
 /* Pulsing severed-X markers in the network diagram */
 .net-svg g.severed-x line,
-.net-svg line[stroke="#ED462D"][stroke-width="2.5"] {
+.net-svg line[stroke="#F6821F"][stroke-width="2.5"] {
   animation: severed-pulse 2.8s ease-in-out infinite;
   transform-origin: center;
 }
@@ -1516,8 +1516,8 @@ html { scroll-behavior: smooth; }
   animation: status-pulse 1.8s ease-in-out infinite;
 }
 @keyframes status-pulse {
-  0%, 100% { box-shadow: 0 0 6px rgba(237,70,45,0.6); opacity: 1; }
-  50%      { box-shadow: 0 0 12px rgba(237,70,45,0.9); opacity: 0.7; }
+  0%, 100% { box-shadow: 0 0 6px rgba(246,130,31,0.6); opacity: 1; }
+  50%      { box-shadow: 0 0 12px rgba(246,130,31,0.9); opacity: 0.7; }
 }
 
 /* Nav link underline-from-center on hover */

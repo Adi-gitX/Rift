@@ -5,7 +5,7 @@
 import React from "react";
 
 const C = {
-  primary: "#ED462D",
+  primary: "#F6821F",
   ok: "#5BE08F",
   warn: "#EAB308",
   fail: "#FF8A75",

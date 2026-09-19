@@ -27,16 +27,23 @@ const Dashboard = () => {
   const matchPr = useMatch("/dashboard/pr/*");
   const matchRepo = useMatch("/dashboard/repo/*");
 
-  const initialActive = (() => {
+  const activeFor = (pathname) => {
     if (matchPr) return "prs";
     if (matchRepo) return "repos";
+    const p = pathname.replace(/\/$/, "");
+    if (p.endsWith("/pr-envs")) return "prs";
+    if (p.endsWith("/repos")) return "repos";
+    if (p.endsWith("/audit")) return "audit";
+    if (p.endsWith("/system")) return "system";
+    if (p.endsWith("/settings")) return "settings";
+    if (p.endsWith("/status")) return "whatsnew";
     return "overview";
-  })();
-  const [active, setActive] = useState(initialActive);
+  };
+  const [active, setActive] = useState(activeFor(loc.pathname));
   useEffect(() => {
-    if (matchPr) setActive("prs");
-    else if (matchRepo) setActive("repos");
-  }, [matchPr, matchRepo]);
+    setActive(activeFor(loc.pathname));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.pathname, matchPr, matchRepo]);
 
   const onNav = (key) => {
     setActive(key);

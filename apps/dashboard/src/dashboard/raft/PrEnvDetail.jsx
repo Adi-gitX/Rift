@@ -91,7 +91,7 @@ const RunnerStepRow = ({ step, runner, defaultStep }) => {
     : isPast
       ? "#5BE08F"
       : isCurrent
-        ? "#ED462D"
+        ? "#F6821F"
         : "rgba(255,255,255,0.18)";
 
   return (
@@ -104,7 +104,7 @@ const RunnerStepRow = ({ step, runner, defaultStep }) => {
           className="inline-block h-1.5 w-1.5 rounded-full"
           style={{
             background: dotColor,
-            boxShadow: isCurrent ? "0 0 8px rgba(237,70,45,0.7)" : undefined,
+            boxShadow: isCurrent ? "0 0 8px rgba(246,130,31,0.7)" : undefined,
           }}
         />
         <div className="min-w-0">
@@ -118,7 +118,7 @@ const RunnerStepRow = ({ step, runner, defaultStep }) => {
         </span>
         <span className="text-[10.5px] text-right">
           {isPast    && <span className="text-[#5BE08F]">✓ ok</span>}
-          {isCurrent && <span className="text-[#ED462D]">● live</span>}
+          {isCurrent && <span className="text-[#F6821F]">● live</span>}
           {isFailedHere && <span className="text-[#FF8A75]">✕ failed</span>}
           {!isPast && !isCurrent && !isFailedHere && <span className="text-white/30">queued</span>}
         </span>
@@ -168,13 +168,13 @@ const TeardownStepRow = ({ step, runner }) => {
     : isPast
       ? "#9aa3a8"
       : isCurrent
-        ? "#ED462D"
+        ? "#F6821F"
         : "rgba(255,255,255,0.18)";
   return (
     <div className="grid grid-cols-[14px_minmax(0,1fr)_70px] items-center gap-3 px-3 py-2 border-b border-white/[0.04] last:border-b-0">
       <span
         className="inline-block h-1.5 w-1.5 rounded-full"
-        style={{ background: dotColor, boxShadow: isCurrent ? "0 0 8px rgba(237,70,45,0.6)" : undefined }}
+        style={{ background: dotColor, boxShadow: isCurrent ? "0 0 8px rgba(246,130,31,0.6)" : undefined }}
       />
       <div className="min-w-0">
         <div className={`d-mono text-[12.5px] ${isCurrent ? "text-white" : isPast ? "text-white/65" : "text-white/40"}`}>
@@ -183,7 +183,7 @@ const TeardownStepRow = ({ step, runner }) => {
       </div>
       <span className="text-[10.5px] text-right">
         {isPast       && <span className="text-white/55">✓ done</span>}
-        {isCurrent    && <span className="text-[#ED462D]">● live</span>}
+        {isCurrent    && <span className="text-[#F6821F]">● live</span>}
         {isFailedHere && <span className="text-[#FF8A75]">✕ failed</span>}
         {!isPast && !isCurrent && !isFailedHere && <span className="text-white/30">queued</span>}
       </span>
@@ -200,7 +200,7 @@ const ActionButton = ({ icon, children, tone = "ghost", onClick, disabled }) => 
       (tone === "danger"
         ? "border-rose-900 text-rose-300 hover:bg-rose-950/40"
         : tone === "primary"
-          ? "border-[#ED462D]/40 text-white bg-[#ED462D]/10 hover:bg-[#ED462D]/20"
+          ? "border-[#F6821F]/40 text-white bg-[#F6821F]/10 hover:bg-[#F6821F]/20"
           : "border-white/[0.10] text-white/85 hover:bg-white/[0.04]")
     }
   >
@@ -374,7 +374,7 @@ export const RaftPrEnvDetail = () => {
           </h1>
           <StatusBadge status={pr.state} tone={tone} big />
           {pr.previewHostname && (
-            <a className="d-mono text-[12px] text-[#ED462D] hover:text-[#ff7a5c] inline-flex items-center gap-1" href={pr.previewHostname} target="_blank" rel="noreferrer">
+            <a className="d-mono text-[12px] text-[#F6821F] hover:text-[#ff7a5c] inline-flex items-center gap-1" href={pr.previewHostname} target="_blank" rel="noreferrer">
               {pr.previewHostname.replace(/^https?:\/\//, "")}
               <ExternalLink size={11} />
             </a>
@@ -393,7 +393,7 @@ export const RaftPrEnvDetail = () => {
           const chips = [];
           if (lc.mode === "customer-bundle") {
             chips.push(
-              <div key="mode" className="inline-flex items-center gap-2 rounded border border-[#ED462D]/40 bg-[#ED462D]/10 px-2 py-1 text-[11px] d-mono text-[#ED462D]">
+              <div key="mode" className="inline-flex items-center gap-2 rounded border border-[#F6821F]/40 bg-[#F6821F]/10 px-2 py-1 text-[11px] d-mono text-[#F6821F]">
                 <span>customer Worker</span>
                 {ab?.bundleBytes !== undefined && (
                   <>
@@ -438,9 +438,9 @@ export const RaftPrEnvDetail = () => {
       </div>
 
       {/* Two-column body */}
-      <div className="grid grid-cols-[minmax(0,1fr)_320px] gap-0 border-b border-white/[0.04]">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-0 border-b border-white/[0.04]">
         {/* Main column */}
-        <div className="px-8 py-7 space-y-7 border-r border-white/[0.04]">
+        <div className="px-8 py-7 space-y-7 xl:border-r border-white/[0.04]">
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Resources (per-PR)</h2>
@@ -499,7 +499,7 @@ export const RaftPrEnvDetail = () => {
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Live logs <span className="text-white/35 normal-case tracking-normal d-mono">poll 2s · LogTail DO ring buffer</span></h2>
               {cfWorkerLogs && (
-                <a href={cfWorkerLogs} target="_blank" rel="noreferrer" className="text-[11px] text-[#ED462D] hover:text-[#ff7a5c] inline-flex items-center gap-1 d-mono">
+                <a href={cfWorkerLogs} target="_blank" rel="noreferrer" className="text-[11px] text-[#F6821F] hover:text-[#ff7a5c] inline-flex items-center gap-1 d-mono">
                   Open Workers Logs ↗
                 </a>
               )}
@@ -571,7 +571,7 @@ export const RaftPrEnvDetail = () => {
             <h3 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold mb-3">Repo</h3>
             <button
               onClick={() => navigate(`/dashboard/repo/${encodeURIComponent(pr.repoId)}`)}
-              className="d-mono text-[12px] text-[#ED462D] hover:text-[#ff7a5c]"
+              className="d-mono text-[12px] text-[#F6821F] hover:text-[#ff7a5c]"
             >
               {pr.repoId} →
             </button>
