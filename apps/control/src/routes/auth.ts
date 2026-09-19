@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { apiErr, apiOk } from '@raft/shared-types';
 import { buildSessionCookie, clearSessionCookie, signSession } from '../lib/auth/cookies.ts';
 import type { ControlAppEnv } from '../app-env.ts';
+import { RAFT_VERSION } from '../version.ts';
 
 const loginBody = z.object({
   email: z.string().email().default('admin@raft.dev'),
@@ -27,7 +28,7 @@ export const authRoutes = new Hono<ControlAppEnv>();
  * rest of the dashboard. The grid backdrop is pure CSS (no JS animations,
  * no images) so it loads instantly.
  */
-const loginPage = (errorMsg = ''): string => `<!doctype html>
+const LOGIN_HTML = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -172,7 +173,7 @@ const loginPage = (errorMsg = ''): string => `<!doctype html>
       </div>
       <h1>Sign in</h1>
       <p class="subtitle">Operator access to the per-PR Cloudflare preview environments control plane.</p>
-      ${errorMsg ? `<div class="err" role="alert">${errorMsg}</div>` : ''}
+      __ERROR_SLOT__
       <form method="POST" action="/login" autocomplete="off">
         <div class="field">
           <label for="email">Operator email</label>
@@ -192,14 +193,21 @@ const loginPage = (errorMsg = ''): string => `<!doctype html>
     </div>
   </main>
   <footer>
-    <span class="dot"></span>raft-control · v0.2.0 · production
+    <span class="dot"></span>raft-control · v${RAFT_VERSION} · production
   </footer>
 </body>
 </html>`;
 
-authRoutes.get('/login', (c) =>
-  c.html(loginPage()),
-);
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+const loginPage = (errorMsg = ''): string =>
+  LOGIN_HTML.replace(
+    '__ERROR_SLOT__',
+    errorMsg ? `<div class="err" role="alert">${escapeHtml(errorMsg)}</div>` : '',
+  );
+
+authRoutes.get('/login', (c) => c.html(loginPage()));
 
 authRoutes.post('/login', async (c) => {
   const form = await c.req.parseBody();
@@ -211,10 +219,7 @@ authRoutes.post('/login', async (c) => {
     return c.html(loginPage('Wrong shared key'), 401);
   }
   const exp = Math.floor(Date.now() / 1000) + 7 * 86400;
-  const cookieValue = await signSession(
-    { sub: parsed.data.email, exp },
-    c.env.SESSION_SIGNING_KEY,
-  );
+  const cookieValue = await signSession({ sub: parsed.data.email, exp }, c.env.SESSION_SIGNING_KEY);
   c.header('set-cookie', buildSessionCookie(cookieValue));
   return c.redirect('/');
 });

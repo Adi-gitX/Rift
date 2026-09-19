@@ -160,7 +160,7 @@ const Sidebar = ({ active, onNav, sessionEmail }) => (
 
 /* ───────────── Top Header ───────────── */
 
-const TopHeader = ({ health }) => (
+const TopHeader = ({ health, accountId }) => (
   <header
     className="fixed top-0 right-0 z-20 flex h-[64px] items-center justify-between gap-3 border-b border-[#1f1f1f] bg-[#0a0a0a] pl-6 pr-6"
     style={{ left: 256 }}
@@ -173,7 +173,7 @@ const TopHeader = ({ health }) => (
           data-testid="account-switcher"
         >
           <span className="fc-team-avatar">CF</span>
-          <span className="text-[13px] font-medium text-white">Cloudflare account · 5aabf3b8…</span>
+          <span className="text-[13px] font-medium text-white">Cloudflare account · {accountId ? `${accountId.slice(0, 8)}…` : "—"}</span>
           <ChevronDown size={13} className="text-[#888]" />
         </button>
       </DropdownMenuTrigger>
@@ -183,7 +183,7 @@ const TopHeader = ({ health }) => (
         </DropdownMenuLabel>
         <DropdownMenuItem className="gap-2 focus:bg-white/[0.06] focus:text-white">
           <span className="fc-team-avatar">CF</span>
-          5aabf3b807d9050ab805de40e0280ef3
+          {accountId ?? "—"}
         </DropdownMenuItem>
         <DropdownMenuSeparator className="bg-[#2a2a2a]" />
         <DropdownMenuItem
@@ -256,10 +256,16 @@ const TopHeader = ({ health }) => (
 
 export const RaftShell = ({ children, active = "overview", onNav = () => {} }) => {
   const [sessionEmail, setSessionEmail] = useState(null);
+  const [accountId, setAccountId] = useState(null);
   const [health, setHealth] = useState({ control: "ok", dispatcher: "?", tail: "?" });
 
   useEffect(() => {
-    api.me().then((r) => setSessionEmail(r?.data?.email ?? null)).catch(() => {});
+    api.me()
+      .then((r) => {
+        setSessionEmail(r?.data?.email ?? null);
+        setAccountId(r?.data?.cloudflare?.accountId ?? null);
+      })
+      .catch(() => {});
     api.health()
       .then((r) => {
         if (r?.data) {
@@ -277,7 +283,7 @@ export const RaftShell = ({ children, active = "overview", onNav = () => {} }) =
     <div className="fc-shell relative flex min-h-screen w-full bg-[#0a0a0a]">
       <span className="fc-bg-glow" aria-hidden />
       <Sidebar active={active} onNav={onNav} sessionEmail={sessionEmail} />
-      <TopHeader health={health} />
+      <TopHeader health={health} accountId={accountId} />
       <main
         className="relative z-10 flex-1 min-w-0"
         style={{ marginLeft: 256, paddingTop: 64 }}

@@ -12,17 +12,22 @@ import { upsertRepo } from '../lib/db/repos.ts';
 import { Logger } from '../lib/logger.ts';
 import { repoCoordinatorIdName } from '../do/repo-coordinator.ts';
 import type { RepoCoordinator } from '../do/repo-coordinator.ts';
+import { mintUploadTokenHash } from '../lib/auth/upload-token.ts';
 
-const PLACEHOLDER_HASH = 'pending-rotation';
-
-const dispatchPr = async (env: Env, payload: PrPayload, action: 'opened' | 'synchronize' | 'reopened' | 'closed'): Promise<void> => {
+const dispatchPr = async (
+  env: Env,
+  payload: PrPayload,
+  action: 'opened' | 'synchronize' | 'reopened' | 'closed',
+): Promise<void> => {
   await upsertInstallation(env.DB, {
     id: payload.installationId,
     githubAccount: payload.repoFullName.split('/')[0] ?? 'unknown',
     githubAccountId: 0,
     accountType: 'organization',
   });
-  const id = env.REPO.idFromName(repoCoordinatorIdName(payload.installationId, payload.repoFullName));
+  const id = env.REPO.idFromName(
+    repoCoordinatorIdName(payload.installationId, payload.repoFullName),
+  );
   const stub = env.REPO.get(id) as DurableObjectStub<RepoCoordinator>;
   await stub.onPrEvent(action, payload);
 };
@@ -33,7 +38,11 @@ const handleOne = async (env: Env, msg: RaftQueueMessage): Promise<void> => {
     case 'pr.synchronize':
     case 'pr.reopened':
     case 'pr.closed':
-      await dispatchPr(env, msg.payload, msg.kind.slice('pr.'.length) as 'opened' | 'synchronize' | 'reopened' | 'closed');
+      await dispatchPr(
+        env,
+        msg.payload,
+        msg.kind.slice('pr.'.length) as 'opened' | 'synchronize' | 'reopened' | 'closed',
+      );
       return;
     case 'installation.created':
       await upsertInstallation(env.DB, {
@@ -53,7 +62,7 @@ const handleOne = async (env: Env, msg: RaftQueueMessage): Promise<void> => {
           githubRepoId: r.id,
           fullName: r.full_name,
           defaultBranch: r.default_branch,
-          uploadTokenHash: PLACEHOLDER_HASH,
+          uploadTokenHash: await mintUploadTokenHash(),
         });
       }
       return;

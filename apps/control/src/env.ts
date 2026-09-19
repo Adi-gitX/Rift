@@ -8,7 +8,13 @@
  * Per PRD §13: every binding declared in wrangler.jsonc MUST appear here.
  * Per PRD §20: no `process.env`. All config flows through this interface.
  */
-import type { RepoCoordinator, PrEnvironment, LogTail, ProvisionRunner, TeardownRunner } from './index.ts';
+import type {
+  RepoCoordinator,
+  PrEnvironment,
+  LogTail,
+  ProvisionRunner,
+  TeardownRunner,
+} from './index.ts';
 
 export type RaftEnvName = 'production' | 'staging' | 'dev';
 
@@ -57,12 +63,6 @@ export interface Env {
   readonly LOGTAIL: DurableObjectNamespace<LogTail>;
   readonly PROVISION_RUNNER: DurableObjectNamespace<ProvisionRunner>;
   readonly TEARDOWN_RUNNER: DurableObjectNamespace<TeardownRunner>;
-
-  // ── Analytics Engine ──────────────────────────────────────────────────────
-  readonly ANALYTICS: AnalyticsEngineDataset;
-
-  // ── Workers for Platforms dispatch namespace ──────────────────────────────
-  readonly DISPATCHER: DispatchNamespace;
 
   // ── Secrets (wrangler secrets / .dev.vars) ────────────────────────────────
   // Free-tier substitution: PRD §13 specifies Secrets Store, but for v1 demo
@@ -146,11 +146,27 @@ export interface TailEvent {
 }
 
 export type RaftQueueMessage =
-  | { readonly kind: 'pr.opened';        readonly payload: PrPayload; readonly deliveryId: string }
-  | { readonly kind: 'pr.synchronize';   readonly payload: PrPayload; readonly deliveryId: string }
-  | { readonly kind: 'pr.reopened';      readonly payload: PrPayload; readonly deliveryId: string }
-  | { readonly kind: 'pr.closed';        readonly payload: PrPayload; readonly deliveryId: string }
-  | { readonly kind: 'installation.created';            readonly payload: InstallationPayload; readonly deliveryId: string }
-  | { readonly kind: 'installation.deleted';            readonly payload: InstallationPayload; readonly deliveryId: string }
-  | { readonly kind: 'installation_repositories.added'; readonly payload: InstallationReposPayload; readonly deliveryId: string }
-  | { readonly kind: 'installation_repositories.removed'; readonly payload: InstallationReposPayload; readonly deliveryId: string };
+  | { readonly kind: 'pr.opened'; readonly payload: PrPayload; readonly deliveryId: string }
+  | { readonly kind: 'pr.synchronize'; readonly payload: PrPayload; readonly deliveryId: string }
+  | { readonly kind: 'pr.reopened'; readonly payload: PrPayload; readonly deliveryId: string }
+  | { readonly kind: 'pr.closed'; readonly payload: PrPayload; readonly deliveryId: string }
+  | {
+      readonly kind: 'installation.created';
+      readonly payload: InstallationPayload;
+      readonly deliveryId: string;
+    }
+  | {
+      readonly kind: 'installation.deleted';
+      readonly payload: InstallationPayload;
+      readonly deliveryId: string;
+    }
+  | {
+      readonly kind: 'installation_repositories.added';
+      readonly payload: InstallationReposPayload;
+      readonly deliveryId: string;
+    }
+  | {
+      readonly kind: 'installation_repositories.removed';
+      readonly payload: InstallationReposPayload;
+      readonly deliveryId: string;
+    };

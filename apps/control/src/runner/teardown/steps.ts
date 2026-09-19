@@ -14,6 +14,8 @@ import * as cfQueues from '../../lib/cloudflare/queues.ts';
 import * as cfWorkers from '../../lib/cloudflare/workers.ts';
 import { type Logger } from '../../lib/logger.ts';
 import { getPrEnvironment } from '../../lib/db/prEnvironments.ts';
+import { getRepo } from '../../lib/db/repos.ts';
+import { bundleKvKey } from '../../lib/bundle-key.ts';
 import type { PrEnvironment } from '../../lib/db/types.ts';
 import type { Env } from '../../env.ts';
 
@@ -102,23 +104,21 @@ export const deleteQueueStep = async (
 
 export const purgeBundleKv = async (
   ctx: TeardownStepContext,
-): Promise<{ deleted: number; prefix: string | null }> => {
-  // Free-tier substitution: bundles live in BUNDLES_KV (KV) under a per-PR
-  // prefix, not in R2. KV doesn't expose list-by-prefix on the binding API
-  // (only on the REST API), so we delete the canonical bundle key and accept
-  // that older heads will TTL out of KV via the put().expirationTtl on upload.
-  // TODO(raft:slice-G) — list+delete via REST KV API for truly stale keys.
+): Promise<{ deleted: number; key: string | null }> => {
+  // Free-tier substitution: bundles live in BUNDLES_KV (KV) under
+  // `bundle:{installation}:{repo}:{headSha}`, not in R2. KV has no
+  // list-by-prefix on the binding API, so we delete the key for the env's
+  // current head SHA; older heads TTL out via put().expirationTtl on upload.
   const env = await loadEnv(ctx);
-  const scriptName = env?.resources.workerScriptName ?? null;
-  if (!scriptName) return { deleted: 0, prefix: null };
-  const key = `bundle:${scriptName}:current`;
+  if (!env) return { deleted: 0, key: null };
+  const repo = await getRepo(ctx.env.DB, env.repoId);
+  if (!repo.ok || !repo.value) return { deleted: 0, key: null };
+  const key = bundleKvKey(ctx.installationId, repo.value.fullName, env.headSha);
   await ctx.env.BUNDLES_KV.delete(key);
-  return { deleted: 1, prefix: scriptName };
+  return { deleted: 1, key };
 };
 
-export const evictDoShard = async (
-  ctx: TeardownStepContext,
-): Promise<{ shardCount: number }> => {
+export const evictDoShard = async (ctx: TeardownStepContext): Promise<{ shardCount: number }> => {
   // PRD amendment A1: there is no list-by-prefix on DO namespaces. The
   // PrEnvironment DO maintains an explicit Set of shard names recorded by the
   // wrapper module. v1 reads the set, logs the count, and lets script deletion

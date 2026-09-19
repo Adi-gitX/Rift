@@ -1,7 +1,14 @@
 # Provided by Raft. Drop this file into the customer's repo at
-# `.github/workflows/raft-bundle.yml`. On every push that matches a PR,
-# the action builds the worker bundle and POSTs it to the Raft control
-# plane, where it's stored under the per-repo upload token.
+# `.github/workflows/raft-bundle.yml`. On every PR push, the action builds the
+# Worker bundle with `wrangler deploy --dry-run` and POSTs it to the Raft
+# control plane as JSON ({wrangler, modules:[{name, content_b64, type}]}),
+# authenticated with the per-repo upload token from the Raft dashboard
+# (Repositories → Rotate upload token).
+#
+# Repo secrets required:
+#   RAFT_UPLOAD_URL    https://raft-control.<your-subdomain>.workers.dev
+#   RAFT_UPLOAD_TOKEN  raft_ut_…  (shown once on rotation)
+#   RAFT_REPO_ID       <installation-id>:<owner>/<repo>  (shown in the dashboard)
 name: raft-bundle
 
 on:
@@ -17,21 +24,41 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # Build the dist/ directory. Wrangler emits the bundled modules plus a
+      # wrangler.json describing bindings + main_module.
       - run: npx wrangler deploy --dry-run --outdir=dist
-      - name: Zip bundle
+      - name: Pack as JSON bundle
         run: |
-          cd dist
-          zip -r ../bundle.zip .
+          node -e "
+            const fs = require('fs'); const path = require('path');
+            const files = fs.readdirSync('dist').filter(f => !f.endsWith('.map'));
+            const entry = files.find(f => /\.m?js$/.test(f));
+            // Newer wrangler versions do not always emit dist/wrangler.json; fall back to a
+            // minimal summary (Raft supplies the per-PR D1/KV/Queue bindings itself).
+            const wrangler = fs.existsSync('dist/wrangler.json')
+              ? JSON.parse(fs.readFileSync('dist/wrangler.json','utf8'))
+              : { main_module: entry, compatibility_date: '2026-04-29' };
+            const modules = files
+              .filter(f => f !== 'wrangler.json')
+              .map(name => ({
+                name,
+                content_b64: fs.readFileSync(path.join('dist', name)).toString('base64'),
+                type: name.endsWith('.wasm') ? 'application/wasm'
+                  : name.endsWith('.js') || name.endsWith('.mjs') ? 'application/javascript+module'
+                  : 'application/octet-stream',
+              }));
+            fs.writeFileSync('bundle.json', JSON.stringify({ wrangler, modules }));
+          "
       - name: Upload to Raft
         env:
-          RAFT_UPLOAD_URL: ${{ secrets.RAFT_UPLOAD_URL }}      # https://your-control.workers.dev
-          RAFT_UPLOAD_TOKEN: ${{ secrets.RAFT_UPLOAD_TOKEN }}  # raft_ut_…
-          RAFT_REPO_ID: ${{ secrets.RAFT_REPO_ID }}            # shown in the Raft dashboard
+          RAFT_UPLOAD_URL: ${{ secrets.RAFT_UPLOAD_URL }}
+          RAFT_UPLOAD_TOKEN: ${{ secrets.RAFT_UPLOAD_TOKEN }}
+          RAFT_REPO_ID: ${{ secrets.RAFT_REPO_ID }}
         run: |
           curl -sS -X POST "$RAFT_UPLOAD_URL/api/v1/bundles/upload" \
             -H "Authorization: Bearer $RAFT_UPLOAD_TOKEN" \
             -H "X-Raft-Repo-Id: $RAFT_REPO_ID" \
             -H "X-Raft-Head-Sha: ${{ github.event.pull_request.head.sha }}" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @bundle.zip \
+            -H "content-type: application/json" \
+            --data-binary @bundle.json \
             --fail-with-body

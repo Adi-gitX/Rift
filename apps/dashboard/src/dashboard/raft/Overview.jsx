@@ -273,16 +273,18 @@ export const RaftOverview = () => {
   const navigate = useNavigate();
   const [me, setMe] = useState(null);
   const [stats, setStats] = useState(null);
+  const [health, setHealth] = useState(null);
   const [prs, setPrs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
-    Promise.all([api.me(), api.stats(), api.prEnvironments()])
-      .then(([mRes, sRes, pRes]) => {
+    Promise.all([api.me(), api.stats(), api.prEnvironments(), api.health().catch(() => null)])
+      .then(([mRes, sRes, pRes, hRes]) => {
         setMe(mRes?.data ?? null);
         setStats(sRes?.data ?? null);
         setPrs(pRes?.data?.prs ?? []);
+        setHealth(hRes?.data ?? null);
       })
       .catch((e) => setErr(String(e)))
       .finally(() => setLoading(false));
@@ -295,7 +297,7 @@ export const RaftOverview = () => {
 
   return (
     <div data-testid="raft-overview">
-      <Hero email={me?.email} deployVersion={"0.2.0"} />
+      <Hero email={me?.email} deployVersion={health?.control?.version ?? "…"} />
       <div className="px-10">
         <StatCardRow stats={stats} navigate={navigate} />
       </div>

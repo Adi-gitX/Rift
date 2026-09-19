@@ -93,10 +93,7 @@ export class TeardownRunner extends DurableObject<Env> {
     }
   }
 
-  private async transitionPrEnv(
-    state: TeardownRunnerState,
-    next: PrEnvState,
-  ): Promise<void> {
+  private async transitionPrEnv(state: TeardownRunnerState, next: PrEnvState): Promise<void> {
     const stub = this.env.PR_ENV.get(
       this.env.PR_ENV.idFromName(state.prEnvId),
     ) as DurableObjectStub<PrEnvironment>;

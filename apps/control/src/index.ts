@@ -19,12 +19,13 @@ import { authRoutes } from './routes/auth.ts';
 import { apiRoutes } from './routes/api.ts';
 import { dashboardRoutes } from './routes/dashboard.ts';
 import { dashboardApi } from './routes/dashboard-api.ts';
+import { adminRoutes } from './routes/admin.ts';
 import { handleQueueBatch } from './queue/consumer.ts';
 import { handleTailQueueBatch } from './queue/tail-consumer.ts';
 import { sweepStaleEnvironments } from './scheduled/sweep.ts';
 import { runAlertChecks } from './scheduled/alerts.ts';
-
-const VERSION = '0.2.0';
+import { reconcileOrphans } from './scheduled/reconcile.ts';
+import { RAFT_COMPAT_DATE, RAFT_VERSION } from './version.ts';
 
 const app = new Hono<ControlAppEnv>();
 
@@ -40,9 +41,9 @@ app.get('/version', (c) =>
     apiOk(
       {
         name: 'raft-control',
-        version: VERSION,
+        version: RAFT_VERSION,
         env: c.env.RAFT_ENV,
-        compat_date: '2026-04-29',
+        compat_date: RAFT_COMPAT_DATE,
       },
       c.var.requestId,
     ),
@@ -52,6 +53,7 @@ app.get('/version', (c) =>
 app.route('/', githubRoutes);
 app.route('/', authRoutes);
 app.route('/', apiRoutes);
+app.route('/', adminRoutes);
 app.route('/', dashboardApi);
 app.route('/', dashboardRoutes);
 
@@ -68,6 +70,8 @@ const handler: ExportedHandler<Env, RaftQueueMessage | TailEvent> = {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(sweepStaleEnvironments(env));
     ctx.waitUntil(runAlertChecks(env));
+    // Safety net: reap per-PR resources whose env row is already terminal.
+    ctx.waitUntil(reconcileOrphans(env, { dryRun: false }));
   },
   async queue(batch, env, ctx) {
     if (batch.queue === 'raft-tail-events') {

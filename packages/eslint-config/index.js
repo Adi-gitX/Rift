@@ -23,7 +23,10 @@ const raftRules = {
     ],
     'no-restricted-globals': [
       'error',
-      { name: 'process', message: 'Use the typed Env interface; never read process.env in Workers.' },
+      {
+        name: 'process',
+        message: 'Use the typed Env interface; never read process.env in Workers.',
+      },
     ],
     eqeqeq: ['error', 'always'],
     curly: ['error', 'multi-line'],

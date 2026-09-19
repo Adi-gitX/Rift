@@ -53,7 +53,9 @@ pr_payload() {
 EOF
 }
 
-scope="pr-$PR_NUMBER"
+# Mirrors runner-state.ts slugForScript: lowercase, strip non-alnum, first 16 chars.
+repo_short=$(printf '%s' "$REPO_FULL" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9' | cut -c1-16)
+scope="pr-$PR_NUMBER--$repo_short"
 pr_env_id="$INSTALL_ID:$REPO_FULL:$PR_NUMBER"
 
 color 36 "1/5  Posting pull_request.opened…"

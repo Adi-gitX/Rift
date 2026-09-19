@@ -33,7 +33,7 @@ Every `REPLACE_ME` in the project, with where to source it. Updated for v0.2.0.
 |---|---|---|
 | `CF_OWN_ACCOUNT_ID` | dash.cloudflare.com → right sidebar → Account ID | `apps/control/wrangler.jsonc.vars` |
 | `CF_WORKERS_SUBDOMAIN` | dash.cloudflare.com → Workers & Pages → "Subdomain" (e.g. `myname.workers.dev`) | `apps/control/wrangler.jsonc.vars` and `apps/dispatcher/wrangler.jsonc.vars` |
-| `CF_API_TOKEN` | dash.cloudflare.com → My Profile → API Tokens → Create Token. Permissions needed: **Account → Workers Scripts:Edit, D1:Edit, KV Storage:Edit, Queues:Edit**. | `wrangler secret put CF_API_TOKEN` (control Worker — production source of all per-PR provisioning auth) |
+| `CF_API_TOKEN` | dash.cloudflare.com → My Profile → API Tokens → Create Token. Permissions needed: **Account → Workers Scripts:Edit, D1:Edit, KV Storage:Edit, Queues:Edit**. D1:Edit covers the per-PR fork (export/import) and the migration preview (`/query` on fork + read on base). | `wrangler secret put CF_API_TOKEN` (control Worker — production source of all per-PR provisioning auth) |
 
 ## 2 — Bootstrap resources
 
@@ -63,10 +63,9 @@ pnpm --filter @raft/control exec wrangler d1 migrations apply raft-meta --remote
 7. Generate a private key (PEM). Save it.
 8. Note the App ID and Client ID from the app settings page.
 
-Set secrets:
+Set `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_NAME` in the `vars` block of `apps/control/wrangler.jsonc` (they are not secrets), then set the secrets:
 
 ```bash
-pnpm --filter @raft/control exec wrangler secret put GITHUB_APP_ID            # the numeric App ID
 pnpm --filter @raft/control exec wrangler secret put GITHUB_WEBHOOK_SECRET    # the random string from step 4
 pnpm --filter @raft/control exec wrangler secret put GITHUB_APP_PRIVATE_KEY   # paste the PEM (multiline ok)
 ```

@@ -50,7 +50,11 @@ export const createPrEnvironment = (
          VALUES (?, ?, ?, 'pending', ?, ?, ?)
          ON CONFLICT(repo_id, pr_number) DO UPDATE SET
            head_sha = excluded.head_sha,
-           last_activity_at = excluded.last_activity_at`,
+           last_activity_at = excluded.last_activity_at,
+           -- A reopened / re-pushed PR whose env was torn down or failed starts over.
+           state = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN 'pending' ELSE pr_environments.state END,
+           state_reason = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.state_reason END,
+           torn_down_at = CASE WHEN pr_environments.state IN ('torn_down','failed') THEN NULL ELSE pr_environments.torn_down_at END`,
       )
       .bind(id, input.repoId, input.prNumber, input.headSha, now, now)
       .run();
@@ -98,7 +102,10 @@ export const transitionState = (
     if (state === 'ready') bindings.push(now);
     if (state === 'torn_down') bindings.push(now);
     bindings.push(id);
-    await db.prepare(stmt).bind(...bindings).run();
+    await db
+      .prepare(stmt)
+      .bind(...bindings)
+      .run();
   });
 
 export interface ResourceHandles {

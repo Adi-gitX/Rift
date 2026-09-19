@@ -32,13 +32,10 @@ const b64UrlDecode = (s: string): Uint8Array => {
 };
 
 const importKey = (secret: string): Promise<CryptoKey> =>
-  crypto.subtle.importKey(
-    'raw',
-    enc.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign', 'verify'],
-  );
+  crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ]);
 
 const hmacHex = async (key: CryptoKey, data: string): Promise<string> => {
   const sig = await crypto.subtle.sign('HMAC', key, enc.encode(data));
@@ -47,10 +44,7 @@ const hmacHex = async (key: CryptoKey, data: string): Promise<string> => {
   return out;
 };
 
-export const signSession = async (
-  payload: SessionPayload,
-  secret: string,
-): Promise<string> => {
+export const signSession = async (payload: SessionPayload, secret: string): Promise<string> => {
   const data = b64UrlBytes(enc.encode(JSON.stringify(payload)));
   const key = await importKey(secret);
   return `${data}.${await hmacHex(key, data)}`;

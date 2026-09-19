@@ -81,14 +81,18 @@ const mapBinding = (
   warnings: string[],
 ): ProducedBinding | null => {
   switch (cb.type) {
-    case 'd1':    return mapD1(cb, resources, warnings);
-    case 'kv':    return mapKv(cb, resources, warnings);
-    case 'queue': return mapQueueBinding(cb, resources, warnings);
+    case 'd1':
+      return mapD1(cb, resources, warnings);
+    case 'kv':
+      return mapKv(cb, resources, warnings);
+    case 'queue':
+      return mapQueueBinding(cb, resources, warnings);
     case 'r2':
       // R2 prefix isolation is enforced via the injected R2_PREFIX env var;
       // the bucket binding stays the customer's bucket.
       return { type: 'r2_bucket', name: cb.binding, bucket_name: cb.bucket_name };
-    case 'do':    return mapDo(cb);
+    case 'do':
+      return mapDo(cb);
   }
 };
 
@@ -112,7 +116,11 @@ export const rewriteBundle = (input: BundleInputs): RewrittenBundle => {
   const bindings: ProducedBinding[] = [
     ...customerBindings,
     ...injectedEnvBindings(input.resources, input.scope),
-    { type: 'plain_text', name: 'RAFT_INTERNAL_DISPATCH_SECRET', text: input.internalDispatchSecret },
+    {
+      type: 'plain_text',
+      name: 'RAFT_INTERNAL_DISPATCH_SECRET',
+      text: input.internalDispatchSecret,
+    },
   ];
 
   return { bindings, modules, warnings };

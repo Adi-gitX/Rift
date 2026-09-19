@@ -16,7 +16,7 @@
  * the prior result is read from storage and re-used (no double API calls).
  */
 import { DurableObject } from 'cloudflare:workers';
-import { CodedError, NonRetryableError } from '@raft/shared-types';
+import { NonRetryableError } from '@raft/shared-types';
 import type { Env } from '../env.ts';
 import { Logger } from '../lib/logger.ts';
 import { appendAudit } from '../lib/db/auditLog.ts';
@@ -24,6 +24,7 @@ import { getPrEnvironment } from '../lib/db/prEnvironments.ts';
 import { ulid } from '../lib/ids.ts';
 import type { PrEnvironment } from './pr-environment.ts';
 import type { PrEnvState } from '../lib/db/types.ts';
+import type { TeardownRunner } from './teardown-runner.ts';
 import {
   type ProvisionRunnerState,
   BACKOFF_MS,
@@ -31,7 +32,7 @@ import {
   STEP_ORDER,
   currentStep,
 } from '../runner/provision/state.ts';
-import { STEP_FNS, type StepContext } from '../runner/provision/steps.ts';
+import { AWAIT_BUNDLE_PENDING, STEP_FNS, type StepContext } from '../runner/provision/steps.ts';
 
 const STATE_KEY = 'state';
 const stepKey = (name: string): string => `step:${name}`;
@@ -53,8 +54,18 @@ export class ProvisionRunner extends DurableObject<Env> {
     // fork-base-db is intentionally OMITTED — re-forking on every redeploy
     // would re-import SQL on top of an already-seeded DB (destructive: rows
     // duplicate, schema migrations may conflict). Fork is a one-shot per
-    // PR env, like resource creation.
-    const SHA_DEPENDENT_STEPS = ['load-config', 'await-bundle', 'rewrite-bundle', 'upload-script', 'route-and-comment'] as const;
+    // PR env, like resource creation. apply-migrations IS re-run: a new
+    // head SHA may add migrations, and already-applied names are skipped
+    // via the fork's d1_migrations table.
+    const SHA_DEPENDENT_STEPS = [
+      'load-config',
+      'await-bundle',
+      'apply-migrations',
+      'snapshot-schema',
+      'rewrite-bundle',
+      'upload-script',
+      'route-and-comment',
+    ] as const;
     for (const name of SHA_DEPENDENT_STEPS) {
       await this.ctx.storage.delete(stepKey(name));
     }
@@ -131,6 +142,8 @@ export class ProvisionRunner extends DurableObject<Env> {
       fetcher,
       prior,
     };
+    const startedAt = state.stepTimings?.[step]?.startedAt;
+    if (startedAt !== undefined) ctx.stepStartedAt = startedAt;
     // Stamp step start (only on the first attempt — retries reuse the same
     // startedAt so wall-clock duration covers all attempts honestly).
     const timings = state.stepTimings ?? {};
@@ -145,7 +158,8 @@ export class ProvisionRunner extends DurableObject<Env> {
       timings[step] = { ...(timings[step] ?? {}), finishedAt: Date.now() };
       const latest = (await this.ctx.storage.get<ProvisionRunnerState>(STATE_KEY)) ?? state;
       await this.ctx.storage.put(STATE_KEY, { ...latest, stepTimings: timings });
-      log.info('step_ok', { ms: timings[step]!.finishedAt! - (timings[step]!.startedAt ?? Date.now()) });
+      const t = timings[step];
+      log.info('step_ok', { ms: (t?.finishedAt ?? Date.now()) - (t?.startedAt ?? Date.now()) });
       await this.advance({ ...latest, stepTimings: timings });
     } catch (e) {
       await this.handleStepError(state, step, e, log);
@@ -190,6 +204,12 @@ export class ProvisionRunner extends DurableObject<Env> {
     log: Logger,
   ): Promise<void> {
     const message = e instanceof Error ? e.message : String(e);
+    if (message === AWAIT_BUNDLE_PENDING) {
+      // Still waiting for the customer's GH Action — re-arm without burning an attempt.
+      log.info('await_bundle_pending_rearm');
+      await this.ctx.storage.setAlarm(Date.now() + 3000);
+      return;
+    }
     const errEntry = { step, ts: Date.now(), message, attempt: state.attempts + 1 };
     const updated: ProvisionRunnerState = {
       ...state,
@@ -252,9 +272,26 @@ export class ProvisionRunner extends DurableObject<Env> {
       targetId: state.prEnvId,
       metadata: { reason, attempts: state.attempts },
     });
-    // TODO(raft:slice-E) — schedule TeardownRunner with reason='failed' for compensation.
+    // Compensating teardown: destroy whatever provision-resources /
+    // upload-script already created so a failed PR never leaks D1/KV/Queue
+    // slots on the free tier. Skipped when we aborted because the PR env is
+    // already terminal — a teardown is running (or finished) in that case.
+    if (!reason.startsWith('aborted:')) await this.scheduleCompensatingTeardown(state);
+  }
+
+  private async scheduleCompensatingTeardown(state: ProvisionRunnerState): Promise<void> {
+    const stub = this.env.TEARDOWN_RUNNER.get(
+      this.env.TEARDOWN_RUNNER.idFromName(state.prEnvId),
+    ) as DurableObjectStub<TeardownRunner>;
+    await stub.start({
+      prEnvId: state.prEnvId,
+      installationId: state.installationId,
+      reason: 'failed',
+      cursor: 0,
+      status: 'pending',
+      attempts: 0,
+      startedAt: 0,
+      errorHistory: [],
+    });
   }
 }
-
-const _coded = CodedError;
-void _coded;

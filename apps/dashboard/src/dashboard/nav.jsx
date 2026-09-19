@@ -43,7 +43,7 @@ export const NAV_FOOTER = [
 /** Cards rendered on the Overview hero — each gets a dot grid + title + desc. */
 export const ENDPOINTS = [
   { key: "ready",      title: "Ready",      desc: "Live preview environments serving traffic at *.workers.dev." },
-  { key: "inflight",   title: "In flight",  desc: "PRs walking the 5-step alarm-driven provision machine." },
+  { key: "inflight",   title: "In flight",  desc: "PRs walking the 9-step alarm-driven provision machine." },
   { key: "failed",     title: "Failed",     desc: "Stuck after exhausting backoff. Inspect → force teardown.", badge: "ALERT" },
   { key: "tornDown",   title: "Torn down",  desc: "Closed PRs whose 9-step destruction completed cleanly." },
 ];
@@ -63,7 +63,9 @@ export const PROVISION_STEPS = [
   { key: "load-config",        label: "load-config",        desc: "Detect customer-bundle / static / fallback at head SHA" },
   { key: "await-bundle",       label: "await-bundle",       desc: "Wait for GH Action upload (≤5min cap, no-op for static)" },
   { key: "provision-resources",label: "provision-resources",desc: "Create D1 + KV + Queue (idempotent, list-then-create)" },
-  { key: "fork-base-db",       label: "fork-base-db",       desc: "Export base D1 → import into per-PR D1 (no-op if no base)" },
+  { key: "fork-base-db",       label: "fork-base-db",       desc: "Export base D1 (from wrangler d1_databases) → import into per-PR D1" },
+  { key: "apply-migrations",   label: "apply-migrations",   desc: "Run pending migrations/*.sql on the fork; skip names already in d1_migrations" },
+  { key: "snapshot-schema",    label: "snapshot-schema",    desc: "sqlite_master + PRAGMA diff fork vs base · row deltas · destructive-SQL scan" },
   { key: "rewrite-bundle",     label: "rewrite-bundle",     desc: "Swap binding IDs, codegen DO wrappers" },
   { key: "upload-script",      label: "upload-script",      desc: "PUT /workers/scripts/{name} + enable subdomain" },
   { key: "route-and-comment",  label: "route-and-comment",  desc: "Write ROUTES KV + sticky PR comment + live probe" },

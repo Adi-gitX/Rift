@@ -12,6 +12,8 @@ export type ProvisionStep =
   | 'await-bundle'
   | 'provision-resources'
   | 'fork-base-db'
+  | 'apply-migrations'
+  | 'snapshot-schema'
   | 'rewrite-bundle'
   | 'upload-script'
   | 'route-and-comment';
@@ -23,12 +25,19 @@ export type ProvisionStep =
  *   - `fork-base-db`: if the repo declares a base D1 (or RAFT_DEMO_BASE_D1_ID
  *     is set), export-then-import to seed the per-PR DB with base-branch
  *     schema + data; otherwise no-op (empty DB).
+ *   - `apply-migrations`: run the PR's pending `migrations/*.sql` against the
+ *     fork (skipping names already in `d1_migrations`); SQL errors are
+ *     recorded, not thrown, so the Worker preview still ships.
+ *   - `snapshot-schema`: diff fork vs base (tables/columns/indexes/row counts)
+ *     for the PR comment + dashboard.
  */
 export const STEP_ORDER: readonly ProvisionStep[] = [
   'load-config',
   'await-bundle',
   'provision-resources',
   'fork-base-db',
+  'apply-migrations',
+  'snapshot-schema',
   'rewrite-bundle',
   'upload-script',
   'route-and-comment',

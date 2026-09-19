@@ -5,3 +5,12 @@ build/
 coverage/
 *.tsbuildinfo
 pnpm-lock.yaml
+
+# CRA dashboard has its own style (double quotes, aligned tables); prose + generated docs are hand-formatted.
+apps/dashboard/
+submission/
+demo/
+docs/
+*.md
+**/*.jsonc
+pnpm-workspace.yaml

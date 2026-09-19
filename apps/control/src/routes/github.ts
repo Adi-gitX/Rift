@@ -31,7 +31,10 @@ githubRoutes.post('/webhooks/github', async (c) => {
   const seen = await c.env.CACHE.get(dedupKey(outcome.deliveryId));
   if (seen) {
     log.info('webhook_deduped', { delivery: outcome.deliveryId });
-    return c.json(apiOk({ accepted: 0, delivery: outcome.deliveryId, dedup: true }, c.var.requestId), 200);
+    return c.json(
+      apiOk({ accepted: 0, delivery: outcome.deliveryId, dedup: true }, c.var.requestId),
+      200,
+    );
   }
   // Stash *before* enqueue so a flapping retry never sees a window where
   // the message has been queued but the dedup key isn't set yet.
@@ -43,5 +46,8 @@ githubRoutes.post('/webhooks/github', async (c) => {
   }
   const messages = translate(outcome.parsed, outcome.deliveryId);
   await Promise.all(messages.map((m) => c.env.EVENTS.send(m)));
-  return c.json(apiOk({ accepted: messages.length, delivery: outcome.deliveryId }, c.var.requestId), 202);
+  return c.json(
+    apiOk({ accepted: messages.length, delivery: outcome.deliveryId }, c.var.requestId),
+    202,
+  );
 });

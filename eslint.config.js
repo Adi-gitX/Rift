@@ -15,7 +15,6 @@ export default tseslint.config(
       '**/*.d.ts',
       'demo/**',
       'apps/dashboard/**',
-      'apps/dashboard.old/**',
     ],
   },
   js.configs.recommended,
@@ -32,7 +31,10 @@ export default tseslint.config(
     },
     settings: {
       'import-x/resolver': {
-        typescript: { alwaysTryTypes: true, project: ['apps/*/tsconfig.json', 'packages/*/tsconfig.json'] },
+        typescript: {
+          alwaysTryTypes: true,
+          project: ['apps/*/tsconfig.json', 'packages/*/tsconfig.json'],
+        },
       },
       'import-x/core-modules': ['cloudflare:workers', 'cloudflare:test'],
     },

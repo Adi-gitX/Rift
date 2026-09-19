@@ -37,8 +37,7 @@ export const handleTailQueueBatch = async (
   for (const msg of batch.messages) {
     try {
       const { scriptName, events } = msg.body;
-      const prEnvId =
-        msg.body.prEnvId ?? (await env.ROUTES.get(REVERSE_INDEX_KEY(scriptName)));
+      const prEnvId = msg.body.prEnvId ?? (await env.ROUTES.get(REVERSE_INDEX_KEY(scriptName)));
       if (!prEnvId) {
         log.warn('tail_no_pr_env', { script: scriptName });
         msg.ack();

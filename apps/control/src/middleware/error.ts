@@ -27,9 +27,16 @@ export const onError = (): ErrorHandler<ControlAppEnv> => (e, c) => {
 // is configured via wrangler.jsonc `not_found_handling: single-page-application`).
 export const onNotFound = (): NotFoundHandler<ControlAppEnv> => async (c) => {
   const path = c.req.path;
-  const isApiPath = path.startsWith('/api/') || path.startsWith('/healthz') || path.startsWith('/version') || path.startsWith('/webhooks/');
+  const isApiPath =
+    path.startsWith('/api/') ||
+    path.startsWith('/healthz') ||
+    path.startsWith('/version') ||
+    path.startsWith('/webhooks/');
   if (isApiPath) {
-    return c.json(apiErr('E_NOT_FOUND', `Route ${c.req.method} ${path} not found`, c.var.requestId), 404);
+    return c.json(
+      apiErr('E_NOT_FOUND', `Route ${c.req.method} ${path} not found`, c.var.requestId),
+      404,
+    );
   }
   // Delegate to the dashboard SPA via static assets.
   return c.env.ASSETS.fetch(c.req.raw);

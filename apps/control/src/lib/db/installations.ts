@@ -73,7 +73,9 @@ export const listActiveInstallations = (
 ): Promise<Result<Installation[], CodedError>> =>
   wrap('listActiveInstallations', async () => {
     const res = await db
-      .prepare(`SELECT ${SELECT_COLS} FROM installations WHERE active = 1 ORDER BY installed_at DESC`)
+      .prepare(
+        `SELECT ${SELECT_COLS} FROM installations WHERE active = 1 ORDER BY installed_at DESC`,
+      )
       .all<InstallationRow>();
     return res.results.map(fromRow);
   });

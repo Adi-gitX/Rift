@@ -9,10 +9,7 @@ import { SELF, env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare
 import { describe, expect, it } from 'vitest';
 import type { TeardownRunner } from '../../src/do/teardown-runner.ts';
 import { signSession } from '../../src/lib/auth/cookies.ts';
-import {
-  hashUploadToken,
-  mintUploadToken,
-} from '../../src/lib/auth/upload-token.ts';
+import { hashUploadToken, mintUploadToken } from '../../src/lib/auth/upload-token.ts';
 import { upsertInstallation } from '../../src/lib/db/installations.ts';
 import { upsertRepo } from '../../src/lib/db/repos.ts';
 import { createPrEnvironment } from '../../src/lib/db/prEnvironments.ts';
@@ -147,7 +144,11 @@ describe('Slice G manual teardown', () => {
       uploadTokenHash: 'h',
     });
     if (!repo.ok) throw repo.error;
-    const pe = await createPrEnvironment(env.DB, { repoId: repo.value.id, prNumber: 1, headSha: 's' });
+    const pe = await createPrEnvironment(env.DB, {
+      repoId: repo.value.id,
+      prNumber: 1,
+      headSha: 's',
+    });
     if (!pe.ok) throw pe.error;
 
     const cookie = await buildSessionCookie();

@@ -47,7 +47,11 @@ export const createIssueComment = async (
   body: string,
 ): Promise<IssueComment> => {
   const url = `${GH_API}/repos/${ownerRepo}/issues/${issueNumber}/comments`;
-  const res = await fetch(url, { method: 'POST', headers: headers(token), body: JSON.stringify({ body }) });
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ body }),
+  });
   if (!res.ok) throw new Error(`github create_comment failed: ${res.status} ${await res.text()}`);
   return res.json() as Promise<IssueComment>;
 };
@@ -59,7 +63,11 @@ export const updateIssueComment = async (
   body: string,
 ): Promise<IssueComment> => {
   const url = `${GH_API}/repos/${ownerRepo}/issues/comments/${commentId}`;
-  const res = await fetch(url, { method: 'PATCH', headers: headers(token), body: JSON.stringify({ body }) });
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: headers(token),
+    body: JSON.stringify({ body }),
+  });
   if (!res.ok) throw new Error(`github update_comment failed: ${res.status} ${await res.text()}`);
   return res.json() as Promise<IssueComment>;
 };
@@ -102,9 +110,14 @@ export const upsertStickyComment = async (
 ): Promise<UpsertStickyCommentResult> => {
   const finalBody = wrapWithMarker(input.body, input.marker);
 
-  if (input.knownCommentId != null) {
+  if (input.knownCommentId !== undefined && input.knownCommentId !== null) {
     try {
-      const updated = await updateIssueComment(input.token, input.ownerRepo, input.knownCommentId, finalBody);
+      const updated = await updateIssueComment(
+        input.token,
+        input.ownerRepo,
+        input.knownCommentId,
+        finalBody,
+      );
       return { commentId: updated.id, created: false, finalBody };
     } catch (e) {
       // 404 = comment was deleted by a human; fall through to recreate.
@@ -119,6 +132,11 @@ export const upsertStickyComment = async (
     return { commentId: updated.id, created: false, finalBody };
   }
 
-  const created = await createIssueComment(input.token, input.ownerRepo, input.issueNumber, finalBody);
+  const created = await createIssueComment(
+    input.token,
+    input.ownerRepo,
+    input.issueNumber,
+    finalBody,
+  );
   return { commentId: created.id, created: true, finalBody };
 };

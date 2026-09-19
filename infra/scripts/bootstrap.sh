@@ -92,7 +92,7 @@ Next:
        pnpm --filter @raft/control exec wrangler secret put GITHUB_APP_PRIVATE_KEY
        pnpm --filter @raft/control exec wrangler secret put SESSION_SIGNING_KEY
        pnpm --filter @raft/control exec wrangler secret put INTERNAL_DISPATCH_SECRET
-       pnpm --filter @raft/control exec wrangler secret put CF_DEMO_API_TOKEN
+       pnpm --filter @raft/control exec wrangler secret put CF_API_TOKEN
   4. Deploy:
        pnpm --filter @raft/control deploy
        pnpm --filter @raft/dispatcher deploy

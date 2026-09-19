@@ -129,7 +129,11 @@ export class CFClient {
     if (o.body !== undefined) {
       if (o.body instanceof FormData) {
         init.body = o.body;
-      } else if (typeof o.body === 'string' || o.body instanceof ArrayBuffer || o.body instanceof Uint8Array) {
+      } else if (
+        typeof o.body === 'string' ||
+        o.body instanceof ArrayBuffer ||
+        o.body instanceof Uint8Array
+      ) {
         init.body = o.body as BodyInit;
       } else {
         init.body = JSON.stringify(o.body);
@@ -242,7 +246,9 @@ const parseEnvelope = <T extends z.ZodTypeAny>(
   try {
     json = JSON.parse(text);
   } catch {
-    return err(new CodedError('E_CF_API', 'cf_invalid_json', { details: { body: text.slice(0, 1024) } }));
+    return err(
+      new CodedError('E_CF_API', 'cf_invalid_json', { details: { body: text.slice(0, 1024) } }),
+    );
   }
   const env = envelopeShape.safeParse(json);
   if (!env.success) {

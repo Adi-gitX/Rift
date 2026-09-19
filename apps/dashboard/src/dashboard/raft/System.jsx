@@ -110,21 +110,21 @@ export const RaftSystem = () => {
             <WorkerCard
               name="raft-control"
               role="webhooks · API · dashboard · cron · queue · DOs"
-              url="https://raft-control.adityakammati3.workers.dev"
+              url={typeof window !== "undefined" ? window.location.origin : "/"}
               status={health?.control?.status ?? "?"}
               version={health?.control?.version}
             />
             <WorkerCard
               name="raft-dispatcher"
               role="path-based proxy → user worker"
-              url={health?.dispatcher?.url ?? "https://raft-dispatcher.adityakammati3.workers.dev"}
+              url={health?.dispatcher?.url ?? "—"}
               status={health?.dispatcher?.status ?? "?"}
               httpStatus={health?.dispatcher?.httpStatus}
             />
             <WorkerCard
               name="raft-tail"
               role="tail consumer → raft-tail-events queue"
-              url={health?.tail?.url ?? "https://raft-tail.adityakammati3.workers.dev"}
+              url={health?.tail?.url ?? "—"}
               status={health?.tail?.status ?? "?"}
               httpStatus={health?.tail?.httpStatus}
             />
@@ -223,7 +223,7 @@ export const RaftSystem = () => {
               { name: "PrEnvironment",    desc: "One per PR. Single-writer for state transitions. Holds log buffer." },
               { name: "ProvisionRunner",  desc: "Alarm-driven 5-step machine. Idempotent on replay. Backoff 1/2/4/8/16s." },
               { name: "TeardownRunner",   desc: "Alarm-driven 9-step destruction machine. Idempotent. CF 404 = already gone." },
-              { name: "LogTail",          desc: "Hibernatable WebSocket fan-out + ring buffer for live logs." },
+              { name: "LogTail",          desc: "Hibernatable WebSocket fan-out + ring buffer: runner step events stream to open dashboard tabs." },
             ].map((d) => (
               <div key={d.name} className="grid grid-cols-[200px_minmax(0,1fr)] gap-4 px-4 py-3 border-b border-white/[0.04] last:border-b-0">
                 <span className="d-mono text-[12.5px] text-white">{d.name}</span>

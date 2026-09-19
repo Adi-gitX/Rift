@@ -35,8 +35,12 @@ jobs:
         run: |
           node -e "
             const fs = require('fs'); const path = require('path');
-            const wrangler = JSON.parse(fs.readFileSync('dist/wrangler.json','utf8'));
-            const modules = fs.readdirSync('dist')
+            const files = fs.readdirSync('dist').filter(f => !f.endsWith('.map'));
+            const entry = files.find(f => /\\.m?js$/.test(f));
+            const wrangler = fs.existsSync('dist/wrangler.json')
+              ? JSON.parse(fs.readFileSync('dist/wrangler.json','utf8'))
+              : { main_module: entry, compatibility_date: '2026-04-29' };
+            const modules = files
               .filter(f => f !== 'wrangler.json')
               .map(name => ({
                 name,
@@ -225,13 +229,13 @@ export const RaftSettings = () => {
         <section>
           <h2 className="mb-3 text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Live endpoints</h2>
           <div className="grid grid-cols-3 gap-3 text-[12px]">
-            <a href="https://raft-control.adityakammati3.workers.dev/healthz" target="_blank" rel="noreferrer" className="border border-white/[0.06] rounded px-3 py-3 hover:bg-white/[0.02] inline-flex items-center justify-between text-white/75">
+            <a href="/healthz" target="_blank" rel="noreferrer" className="border border-white/[0.06] rounded px-3 py-3 hover:bg-white/[0.02] inline-flex items-center justify-between text-white/75">
               raft-control /healthz <ExternalLink size={11} />
             </a>
-            <a href="https://raft-control.adityakammati3.workers.dev/version" target="_blank" rel="noreferrer" className="border border-white/[0.06] rounded px-3 py-3 hover:bg-white/[0.02] inline-flex items-center justify-between text-white/75">
+            <a href="/version" target="_blank" rel="noreferrer" className="border border-white/[0.06] rounded px-3 py-3 hover:bg-white/[0.02] inline-flex items-center justify-between text-white/75">
               /version <ExternalLink size={11} />
             </a>
-            <a href="https://raft-dispatcher.adityakammati3.workers.dev" target="_blank" rel="noreferrer" className="border border-white/[0.06] rounded px-3 py-3 hover:bg-white/[0.02] inline-flex items-center justify-between text-white/75">
+            <a href={`https://raft-dispatcher.${me?.cloudflare?.workersSubdomain ?? "workers.dev"}`} target="_blank" rel="noreferrer" className="border border-white/[0.06] rounded px-3 py-3 hover:bg-white/[0.02] inline-flex items-center justify-between text-white/75">
               raft-dispatcher <ExternalLink size={11} />
             </a>
           </div>

@@ -105,7 +105,7 @@ describe('Slice B webhook → queue → DO → audit', () => {
     const runner = env.PROVISION_RUNNER.get(
       env.PROVISION_RUNNER.idFromName(prEnvId),
     ) as DurableObjectStub<ProvisionRunner>;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) {
       await runDurableObjectAlarm(runner);
       const snap = await runInDurableObject(runner, async (r: ProvisionRunner) =>
         r.getStateSnapshot(),
@@ -114,13 +114,22 @@ describe('Slice B webhook → queue → DO → audit', () => {
       await new Promise((res) => setTimeout(res, 20));
     }
 
-    const finalRow = await env.DB.prepare(`SELECT state FROM pr_environments WHERE id = ?`)
-      .bind(prEnvId)
-      .first<{ state: string }>();
+    // The D1 transition is the last write of the final alarm; give the
+    // pool-workers storage a moment to settle before asserting.
+    let finalRow: { state: string } | null = null;
+    for (let i = 0; i < 20; i++) {
+      finalRow = await env.DB.prepare(`SELECT state FROM pr_environments WHERE id = ?`)
+        .bind(prEnvId)
+        .first<{ state: string }>();
+      if (finalRow?.state === 'ready') break;
+      await new Promise((res) => setTimeout(res, 50));
+    }
     expect(finalRow?.state).toBe('ready');
 
     const stub = env.PR_ENV.get(env.PR_ENV.idFromName(prEnvId)) as DurableObjectStub<PrEnvironment>;
-    const seen = await runInDurableObject(stub, async (instance: PrEnvironment) => instance.getState());
+    const seen = await runInDurableObject(stub, async (instance: PrEnvironment) =>
+      instance.getState(),
+    );
     expect(seen.state).toBe('ready');
 
     const audits = await listAuditForTarget(env.DB, 'pr_environment', prEnvId);

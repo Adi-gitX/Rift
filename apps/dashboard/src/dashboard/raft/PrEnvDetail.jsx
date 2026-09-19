@@ -12,6 +12,7 @@ import {
 import { PROVISION_STEPS, TEARDOWN_STEPS } from "@/dashboard/nav";
 import { api, fmtDate, fmtRelative, stateTone } from "@/dashboard/raft/api";
 import { StepLatencyBars } from "@/dashboard/raft/charts";
+import { DatabasePanel } from "@/dashboard/raft/DatabasePanel";
 
 // Cloudflare account id is fetched from /api/me at mount time; never hardcoded.
 
@@ -454,12 +455,14 @@ export const RaftPrEnvDetail = () => {
             </div>
           </section>
 
+          <DatabasePanel runner={runner} />
+
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">
                 Provision steps {runner?.snapshot && <span className="text-white/35 normal-case tracking-normal d-mono ml-2">(runner: {runner.snapshot.status ?? "?"})</span>}
               </h2>
-              <span className="text-[10.5px] text-white/35 d-mono">5 alarm-driven steps · idempotent on replay</span>
+              <span className="text-[10.5px] text-white/35 d-mono">{PROVISION_STEPS.length} alarm-driven steps · idempotent on replay</span>
             </div>
             <div className="border border-white/[0.06] rounded">
               {PROVISION_STEPS.map((s) => (
@@ -545,7 +548,7 @@ export const RaftPrEnvDetail = () => {
             <h3 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold mb-3">Runner</h3>
             <dl className="text-[12px] space-y-2">
               <div className="flex justify-between"><dt className="text-white/55">Status</dt><dd className="d-mono text-white/85">{runner?.snapshot?.status ?? "—"}</dd></div>
-              <div className="flex justify-between"><dt className="text-white/55">Cursor</dt><dd className="d-mono text-white/85">{runner?.snapshot?.cursor ?? "—"} / 5</dd></div>
+              <div className="flex justify-between"><dt className="text-white/55">Cursor</dt><dd className="d-mono text-white/85">{runner?.snapshot?.cursor ?? "—"} / {PROVISION_STEPS.length}</dd></div>
               <div className="flex justify-between"><dt className="text-white/55">Attempts</dt><dd className="d-mono text-white/85">{runner?.snapshot?.attempts ?? "—"}</dd></div>
               <div className="flex justify-between"><dt className="text-white/55">Errors</dt><dd className="d-mono text-white/85">{(runner?.snapshot?.errorHistory ?? []).length}</dd></div>
               <div className="flex justify-between"><dt className="text-white/55">Started</dt><dd className="text-white/85">{runner?.snapshot?.startedAt ? fmtDate(runner.snapshot.startedAt / 1000) : "—"}</dd></div>

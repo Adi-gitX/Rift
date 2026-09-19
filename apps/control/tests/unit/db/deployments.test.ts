@@ -63,8 +63,20 @@ describe('deployments repo', () => {
     const prEnvId = await setupPrEnv('2');
     const id1 = ulid(1000);
     const id2 = ulid(2000);
-    await createDeployment(env.DB, { id: id1, prEnvId, headSha: 'a', bundleR2Key: 'k1', startedAt: 100 });
-    await createDeployment(env.DB, { id: id2, prEnvId, headSha: 'b', bundleR2Key: 'k2', startedAt: 200 });
+    await createDeployment(env.DB, {
+      id: id1,
+      prEnvId,
+      headSha: 'a',
+      bundleR2Key: 'k1',
+      startedAt: 100,
+    });
+    await createDeployment(env.DB, {
+      id: id2,
+      prEnvId,
+      headSha: 'b',
+      bundleR2Key: 'k2',
+      startedAt: 200,
+    });
     const r = await listDeploymentsForPrEnv(env.DB, prEnvId);
     if (!r.ok) throw r.error;
     expect(r.value).toHaveLength(2);

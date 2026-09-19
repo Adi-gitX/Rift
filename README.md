@@ -4,7 +4,7 @@
 
 A GitHub App that, on every pull request, provisions a fully isolated Cloudflare stack — D1 + KV + Queue + Durable Object shard + a deployed Worker — comments the preview URL on the PR, and tears it all down when the PR closes. End-to-end on the Cloudflare free tier.
 
-— [Live dashboard](https://raft-control.adityakammati3.workers.dev) · [PRD](./rift_PRD.md) · [Submission write-up](./SUBMISSION.md) · v0.2.0
+— [Live dashboard](https://raft-control.adityakammati3.workers.dev) · [PRD](./rift_PRD.md) · [Submission write-up](./SUBMISSION.md) · v0.3.0
 
 ---
 
@@ -24,7 +24,7 @@ The Cloudflare community has been asking for this since 2022 ([workers-sdk #2701
 2. A developer opens a pull request.
 3. Raft receives the webhook, dedups it on `delivery_id`, enqueues it, and returns `202` in under 200ms.
 4. A `RepoCoordinator` Durable Object claims the PR, runs free-tier quota checks, and starts a `ProvisionRunner`.
-5. The runner executes a 7-step alarm-driven machine: detect deployment mode → wait for the customer's bundle (or synthesise one for static sites) → create D1 + KV + Queue + DO shard → optionally fork the base D1 database → rewrite binding IDs in the bundle → upload the Worker script → write the dispatcher route and post a sticky PR comment with the preview URL.
+5. The runner executes a 9-step alarm-driven machine: detect deployment mode and the customer's base D1 → wait for the customer's bundle (or synthesise one for static sites) → create D1 + KV + Queue + DO shard → fork the base D1 database → apply the PR's pending `migrations/*.sql` to the fork → snapshot and diff the schema against base → rewrite binding IDs in the bundle → upload the Worker script → write the dispatcher route and post a sticky PR comment with the preview URL and the database diff.
 6. A reviewer clicks the URL. The `raft-dispatcher` Worker resolves the path to the per-PR Worker via an HMAC-gated token and 302-redirects them in. They see a fully isolated environment — their writes never touch staging.
 7. When the PR is closed or merged, a `TeardownRunner` runs a 9-step alarm machine that destroys every resource and confirms each deletion against the Cloudflare REST API.
 
@@ -36,6 +36,29 @@ End-to-end measured: **<2 seconds** PR-opened to ready preview URL · **<30 seco
 - **Open-source Workers maintainers.** Let drive-by contributors share a working preview without granting them deploy access.
 - **Internal tools / dashboards built on Workers.** Stakeholder review without standing up per-environment infra.
 - **Static-site repos hosted on Workers.** Zero customer setup — Raft synthesises a Worker that serves the inlined files.
+
+## D1 branching + migration preview (what Cloudflare's own previews cannot do)
+
+Workers Builds gives every branch a preview URL, but that preview runs the PR's code against the **same production D1 / KV / Queue bindings**. A PR that adds a migration either never runs it, or runs it against production. Raft treats the database as part of the PR:
+
+1. `load-config` reads `wrangler.{jsonc,json,toml}` at the PR head and takes `d1_databases[0].database_id` as the base database (plus `migrations_dir`, default `migrations/`).
+2. `fork-base-db` exports the base with the D1 REST API and imports the dump into the per-PR database, so the fork carries the base's schema, data **and** its `d1_migrations` history.
+3. `apply-migrations` runs only the `migrations/*.sql` files not yet recorded in the fork's `d1_migrations` (the same table `wrangler d1 migrations apply` uses), via `POST /d1/database/{id}/query`. A SQL error never blocks the Worker preview: it is recorded, later files are skipped, and the exact SQLite message lands in the PR comment.
+4. `snapshot-schema` reads `sqlite_master`, `PRAGMA table_info` and `COUNT(*)` on both fork and base and computes the diff: tables, columns, indexes added / removed / changed, and row deltas. Destructive statements (`DROP TABLE`, `DROP COLUMN`, `RENAME`, `DELETE`/`UPDATE` without `WHERE`) are flagged.
+5. The sticky PR comment gains a **Database** section; the dashboard PR page gains a Database panel with the same data.
+
+On `synchronize` the fork is kept (one-shot per PR), migrations re-run for new files only, and the comment is edited in place. Closing the PR deletes the fork with everything else.
+
+```
+**Database:** forked from base `raft-demo-source` `969a17b6…` → fork `1f3c9a2b…` · 2.0 KB dump
+**Migrations:** 1 migration applied (`0002_add_posts.sql` 412 ms) · 1 already applied on base
+| Schema change | Detail |
+|---|---|
+| + table | `posts` |
+| + column | `users.bio` TEXT |
+| + index | `idx_posts_user` |
+| rows | posts 0 → 3 |
+```
 
 ## Three deployment modes
 
@@ -70,7 +93,7 @@ All three modes are end-to-end verified against real Cloudflare resources.
 
 ## Architecture
 
-Three Workers participate. `raft-control` is the brain (webhooks, API, dashboard, cron, every Durable Object). `raft-dispatcher` is the path-based router that 302-redirects reviewers into per-PR Workers. `raft-tail` is a Tail consumer scaffolded for paid-tier upgrade.
+Three Workers participate. `raft-control` is the brain (webhooks, API, dashboard, cron, every Durable Object). `raft-dispatcher` is the path-based router that 302-redirects reviewers into per-PR Workers. `raft-tail` is a Tail consumer, deployed but not yet attached to per-PR scripts (`tail_consumers` requires Workers Paid).
 
 ```mermaid
 flowchart LR
@@ -87,7 +110,7 @@ flowchart LR
     direction TB
     REPO[RepoCoordinator]
     PRENV[PrEnvironment]
-    PROV[ProvisionRunner<br/>7-step alarm machine]
+    PROV[ProvisionRunner<br/>9-step alarm machine]
     TEAR[TeardownRunner<br/>9-step alarm machine]
     LT[LogTail]
   end
@@ -130,7 +153,7 @@ flowchart LR
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
 | `raft-control`    | GitHub webhook ingress, Hono REST API, dashboard SPA, cron sweep, every Durable Object class, GitHub App auth, Cloudflare REST client, audit log writes | Single trust boundary for everything that holds secrets and writes to D1.                                              |
 | `raft-dispatcher` | One path-based route. Looks up `ROUTES` KV, validates the per-scope HMAC token, 302s to the per-PR `*.workers.dev` URL.                                | Hot path for every reviewer click. Kept as small as possible so it stays cold-start-cheap and never holds App secrets. |
-| `raft-tail`       | Consumes user-Worker `tail()` events into `raft-tail-events` Queue, fan out to `LogTail` DO.                                                           | Tail consumers must be a separate Worker per Cloudflare's binding model.                                               |
+| `raft-tail`       | Forwards user-Worker `tail()` events into the `raft-tail-events` Queue for `LogTail` fan-out. Deployed; attaching it as a `tail_consumer` needs Workers Paid (CF error 100150), so it stays dark on the free tier. | Tail consumers must be a separate Worker per Cloudflare's binding model.                                               |
 
 ### Cloudflare products used
 
@@ -139,11 +162,11 @@ flowchart LR
 | Workers                  | `raft-control`, `raft-dispatcher`, `raft-tail`                                     |
 | Workers Static Assets    | Dashboard SPA hosted inside `raft-control`                                         |
 | Durable Objects (SQLite) | `RepoCoordinator`, `PrEnvironment`, `ProvisionRunner`, `TeardownRunner`, `LogTail` |
-| D1                       | `raft-meta` for installations, repos, PR envs, audit                               |
+| D1                       | `raft-meta` for installations, repos, PR envs, audit; per-PR forks of the customer's base DB via export/import; migrations applied and schema diffed via the `/query` REST API |
 | KV                       | Session cache (`CACHE`), dispatcher routes (`ROUTES`), bundle blobs (`BUNDLES_KV`) |
 | Queues                   | Decouple webhook ingress from provisioning                                         |
 | Cron Triggers            | Daily idle-environment sweep                                                       |
-| Hibernatable WebSockets  | Live runner-state stream to dashboard tabs                                         |
+| Hibernatable WebSockets  | `LogTail` DO exposes a WS stream; the SPA currently polls runner state every 2 s     |
 | Workers Logs             | Operator log access via per-PR deep-links                                          |
 
 ### Why this can only exist on Cloudflare
@@ -210,7 +233,7 @@ sequenceDiagram
 
 ### Provision lifecycle in detail
 
-Seven idempotent steps, alarm-driven, exponential backoff (`1 → 2 → 4 → 8 → 16s`, max 5 attempts). Each step writes its result into DO storage so re-runs on alarm replay short-circuit. Per-step start / finish timestamps are persisted, so the dashboard latency chart reflects truth.
+Nine idempotent steps, alarm-driven, exponential backoff (`1 → 2 → 4 → 8 → 16s`, max 5 attempts). Each step writes its result into DO storage so re-runs on alarm replay short-circuit. Per-step start / finish timestamps are persisted, so the dashboard latency chart reflects truth.
 
 ```mermaid
 stateDiagram-v2
@@ -218,7 +241,9 @@ stateDiagram-v2
   load_config --> await_bundle: detect mode (customer-bundle / static / fallback)
   await_bundle --> provision_resources: bundle ready (or no-op for static / fallback)
   provision_resources --> fork_base_db: D1 + KV + Queue created (list-then-create idempotent)
-  fork_base_db --> rewrite_bundle: base D1 export → import (no-op without base)
+  fork_base_db --> apply_migrations: base D1 export → import (no-op without base)
+  apply_migrations --> snapshot_schema: pending migrations/*.sql run on the fork (SQL errors recorded, not thrown)
+  snapshot_schema --> rewrite_bundle: fork vs base diff + destructive-SQL scan
   rewrite_bundle --> upload_script: binding IDs swapped, DO wrappers codegen'd
   upload_script --> route_and_comment: PUT /workers/scripts/{name} + enable subdomain
   route_and_comment --> ready: ROUTES KV + sticky PR comment + live HTTP probe
@@ -361,7 +386,7 @@ The PRD targets two paid Cloudflare products; Raft substitutes both with thin ab
 | CF resources after teardown             | D1 / KV / Queue / Worker → all `404`                                       |
 | Webhook dedup on replayed `delivery_id` | `200` + `dedup:true` (no double-provision)                                 |
 | Sticky PR comment                       | Edited in place via embedded HTML marker — never duplicated                |
-| Tests                                   | 105 / 105 across 25 files (vitest-pool-workers)                            |
+| Tests                                   | 146 / 146 across 34 files (vitest-pool-workers; in-memory fake D1 + GitHub) |
 | TypeScript                              | `strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes`, no `any` |
 | File / function caps                    | <300 / <40 lines (ESLint-enforced)                                         |
 
@@ -372,7 +397,7 @@ The PRD targets two paid Cloudflare products; Raft substitutes both with thin ab
 ```bash
 nvm use && corepack enable
 pnpm install
-pnpm typecheck && pnpm test     # 105/105
+pnpm typecheck && pnpm lint && pnpm test     # 146/146
 pnpm --filter @raft/control dev # http://localhost:8787
 ```
 

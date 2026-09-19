@@ -14,7 +14,9 @@ import { upsertStickyComment } from '../../../../src/lib/github/comments.ts';
 const jsonResponse = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-const installFetch = (impl: (req: Request) => Response | Promise<Response>): ReturnType<typeof vi.fn> => {
+const installFetch = (
+  impl: (req: Request) => Response | Promise<Response>,
+): ReturnType<typeof vi.fn> => {
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = input instanceof Request ? input : new Request(String(input), init);
     return impl(req);
@@ -118,12 +120,10 @@ describe('upsertStickyComment', () => {
       if (path.endsWith('/issues/7/comments') && req.method === 'GET') return jsonResponse(200, []);
       if (req.method === 'POST') {
         // capture body
-        return req
-          .json()
-          .then((b: unknown) => {
-            postedBody = (b as { body: string }).body;
-            return jsonResponse(201, { id: 1, body: postedBody });
-          });
+        return req.json().then((b: unknown) => {
+          postedBody = (b as { body: string }).body;
+          return jsonResponse(201, { id: 1, body: postedBody });
+        });
       }
       throw new Error('unexpected');
     });
@@ -134,8 +134,6 @@ describe('upsertStickyComment', () => {
 
   it('rethrows non-404 errors from the knownCommentId PATCH (e.g. 401 token expired)', async () => {
     installFetch((_req) => jsonResponse(401, { message: 'Bad credentials' }));
-    await expect(
-      upsertStickyComment({ ...baseInput, knownCommentId: 1 }),
-    ).rejects.toThrow(/401/);
+    await expect(upsertStickyComment({ ...baseInput, knownCommentId: 1 })).rejects.toThrow(/401/);
   });
 });

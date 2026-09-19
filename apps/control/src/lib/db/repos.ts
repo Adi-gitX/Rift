@@ -86,9 +86,7 @@ export const listReposForInstallation = (
 ): Promise<Result<Repo[], CodedError>> =>
   wrap('listReposForInstallation', async () => {
     const res = await db
-      .prepare(
-        `SELECT ${SELECT_COLS} FROM repos WHERE installation_id = ? ORDER BY full_name ASC`,
-      )
+      .prepare(`SELECT ${SELECT_COLS} FROM repos WHERE installation_id = ? ORDER BY full_name ASC`)
       .bind(installationId)
       .all<RepoRow>();
     return res.results.map(fromRow);
@@ -100,10 +98,7 @@ export const rotateUploadTokenHash = (
   newHash: string,
 ): Promise<Result<void, CodedError>> =>
   wrap('rotateUploadTokenHash', async () => {
-    await db
-      .prepare(`UPDATE repos SET upload_token_hash = ? WHERE id = ?`)
-      .bind(newHash, id)
-      .run();
+    await db.prepare(`UPDATE repos SET upload_token_hash = ? WHERE id = ?`).bind(newHash, id).run();
   });
 
 export const setBaseResources = (

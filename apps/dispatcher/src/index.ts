@@ -46,10 +46,12 @@ const signScope = async (scope: string, secret: string): Promise<string> => {
     false,
     ['sign'],
   );
-  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`raft-preview:${scope}`)));
+  const sig = new Uint8Array(
+    await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`raft-preview:${scope}`)),
+  );
   // base64url, first 16 bytes.
   let s = '';
-  for (let i = 0; i < 16; i++) s += String.fromCharCode(sig[i]!);
+  for (let i = 0; i < 16; i++) s += String.fromCharCode(sig[i] ?? 0);
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
@@ -74,14 +76,11 @@ const handler: ExportedHandler<DispatcherEnv> = {
     // honours Set-Cookie on 3xx). The query param doubles as the first-hit
     // gate for clients that don't store cookies.
     const token = await signScope(scope, env.INTERNAL_DISPATCH_SECRET);
-    const sep = url.search ? '&' : (rest.includes('?') ? '&' : '?');
+    const sep = url.search ? '&' : rest.includes('?') ? '&' : '?';
     const search = url.search ? `${url.search}${sep}raft_t=${token}` : `?raft_t=${token}`;
     const target = `https://${scriptName}.${env.CF_WORKERS_SUBDOMAIN}/${rest}${search}`;
     const headers = new Headers({ location: target });
-    headers.append(
-      'set-cookie',
-      `raft_t=${token}; Path=/; Max-Age=86400; SameSite=Lax; Secure`,
-    );
+    headers.append('set-cookie', `raft_t=${token}; Path=/; Max-Age=86400; SameSite=Lax; Secure`);
     return new Response(null, { status: 302, headers });
   },
 };

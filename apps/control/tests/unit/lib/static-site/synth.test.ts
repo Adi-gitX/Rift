@@ -29,7 +29,11 @@ const tree = (paths: { path: string; size?: number }[]): RepoTree => ({
 
 describe('detectStatic', () => {
   it('detects static even when wrangler config is present (Track A is not wired yet)', () => {
-    const t = tree([{ path: 'wrangler.jsonc' }, { path: 'public/index.html' }, { path: 'src/index.ts' }]);
+    const t = tree([
+      { path: 'wrangler.jsonc' },
+      { path: 'public/index.html' },
+      { path: 'src/index.ts' },
+    ]);
     const d = detectStatic(t);
     expect(d.isStatic).toBe(true);
     expect(d.root).toBe('public/');
@@ -107,7 +111,11 @@ describe('synthesizeWorker', () => {
     files: [
       { servedPath: '/index.html', contentType: 'text/html; charset=utf-8', text: '<h1>hi</h1>' },
       { servedPath: '/style.css', contentType: 'text/css; charset=utf-8', text: 'body{color:red}' },
-      { servedPath: '/logo.png', contentType: 'image/png', bytes: new Uint8Array([0xff, 0x00, 0x88]) },
+      {
+        servedPath: '/logo.png',
+        contentType: 'image/png',
+        bytes: new Uint8Array([0xff, 0x00, 0x88]),
+      },
     ],
     totalBytes: 30,
     warnings: [],
@@ -173,7 +181,9 @@ describe('synthesizeWorker', () => {
 // Evaluate the synthesised module source. The source uses `export default
 // {...}` which we rewrite to `return {...}` so we can run it in a Function
 // body without needing vite-node's data: URL import support.
-const loadModule = async (source: string): Promise<{ fetch: (req: Request) => Promise<Response> }> => {
+const loadModule = async (
+  source: string,
+): Promise<{ fetch: (req: Request) => Promise<Response> }> => {
   const body = source.replace(/export default /, 'return ');
   const factory = new Function(body) as () => { fetch: (req: Request) => Promise<Response> };
   return factory();

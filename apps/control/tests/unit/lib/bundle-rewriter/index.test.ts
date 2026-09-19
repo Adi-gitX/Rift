@@ -21,7 +21,13 @@ describe('bundle-rewriter', () => {
   it('swaps D1, KV, and Queue binding ids onto provisioned resources', () => {
     const r = rewriteBundle({
       wrangler: fixture,
-      modules: [{ name: 'worker.js', content: 'export default {}', contentType: 'application/javascript+module' }],
+      modules: [
+        {
+          name: 'worker.js',
+          content: 'export default {}',
+          contentType: 'application/javascript+module',
+        },
+      ],
       resources: {
         d1: [{ binding: 'DB', database_id: 'pr-d1-uuid', database_name: 'app-pr-1' }],
         kv: [{ binding: 'KV', id: 'pr-kv-id', title: 'app-kv-pr-1' }],

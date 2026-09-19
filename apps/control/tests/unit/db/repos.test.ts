@@ -9,7 +9,12 @@ import {
   upsertRepo,
 } from '../../../src/lib/db/repos.ts';
 
-const installation = { id: 'inst-repos', githubAccount: 'acme', githubAccountId: 7, accountType: 'organization' as const };
+const installation = {
+  id: 'inst-repos',
+  githubAccount: 'acme',
+  githubAccountId: 7,
+  accountType: 'organization' as const,
+};
 
 describe('repos repo', () => {
   it('upserts and round-trips with upload_token_hash', async () => {

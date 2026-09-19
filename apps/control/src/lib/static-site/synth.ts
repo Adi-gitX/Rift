@@ -25,33 +25,33 @@ export const MAX_FILES = 100;
 
 const TEXT_EXT_TO_CT: Record<string, string> = {
   html: 'text/html; charset=utf-8',
-  htm:  'text/html; charset=utf-8',
-  css:  'text/css; charset=utf-8',
-  js:   'application/javascript; charset=utf-8',
-  mjs:  'application/javascript; charset=utf-8',
+  htm: 'text/html; charset=utf-8',
+  css: 'text/css; charset=utf-8',
+  js: 'application/javascript; charset=utf-8',
+  mjs: 'application/javascript; charset=utf-8',
   json: 'application/json; charset=utf-8',
-  svg:  'image/svg+xml',
-  txt:  'text/plain; charset=utf-8',
-  xml:  'application/xml; charset=utf-8',
-  md:   'text/markdown; charset=utf-8',
+  svg: 'image/svg+xml',
+  txt: 'text/plain; charset=utf-8',
+  xml: 'application/xml; charset=utf-8',
+  md: 'text/markdown; charset=utf-8',
 };
 
 const BIN_EXT_TO_CT: Record<string, string> = {
-  png:  'image/png',
-  jpg:  'image/jpeg',
+  png: 'image/png',
+  jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
-  gif:  'image/gif',
-  ico:  'image/x-icon',
+  gif: 'image/gif',
+  ico: 'image/x-icon',
   webp: 'image/webp',
   avif: 'image/avif',
   woff: 'font/woff',
-  woff2:'font/woff2',
-  ttf:  'font/ttf',
-  otf:  'font/otf',
-  pdf:  'application/pdf',
-  mp4:  'video/mp4',
-  mp3:  'audio/mpeg',
-  wav:  'audio/wav',
+  woff2: 'font/woff2',
+  ttf: 'font/ttf',
+  otf: 'font/otf',
+  pdf: 'application/pdf',
+  mp4: 'video/mp4',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
 };
 
 const extOf = (path: string): string => {
@@ -123,19 +123,13 @@ export const fetchAndInlineFiles = async (
   const files: InlinedFile[] = [];
   const warnings: string[] = [];
   let totalBytes = 0;
-
-  // Sort: index.html first, then small assets first so we get the most useful
-  // pages in if we hit the cap.
-  const entries = [...detection.candidates].sort((a, b) => {
-    const aIsIndex = a.path.endsWith('index.html') ? 0 : 1;
-    const bIsIndex = b.path.endsWith('index.html') ? 0 : 1;
-    if (aIsIndex !== bIsIndex) return aIsIndex - bIsIndex;
-    return (a.size ?? 0) - (b.size ?? 0);
-  });
+  const entries = sortCandidates(detection.candidates);
 
   for (const entry of entries) {
     if (files.length >= MAX_FILES) {
-      warnings.push(`max ${MAX_FILES} files reached, dropped ${entries.length - files.length} more`);
+      warnings.push(
+        `max ${MAX_FILES} files reached, dropped ${entries.length - files.length} more`,
+      );
       break;
     }
     if ((entry.size ?? 0) > MAX_FILE_BYTES) {
@@ -150,25 +144,26 @@ export const fetchAndInlineFiles = async (
     const blob = await getRepoBlob(token, ownerRepo, entry.sha);
     const bytes = base64ToBytes(blob.content);
     totalBytes += bytes.byteLength;
-
-    const ext = extOf(entry.path);
-    const servedPath = '/' + entry.path.slice(detection.root.length);
-    if (ext in TEXT_EXT_TO_CT) {
-      files.push({
-        servedPath,
-        contentType: TEXT_EXT_TO_CT[ext]!,
-        text: new TextDecoder('utf-8').decode(bytes),
-      });
-    } else {
-      files.push({
-        servedPath,
-        contentType: BIN_EXT_TO_CT[ext]!,
-        bytes,
-      });
-    }
+    files.push(toInlinedFile('/' + entry.path.slice(detection.root.length), entry.path, bytes));
   }
 
   return { files, totalBytes, warnings };
+};
+
+/** index.html first, then smallest assets first, so the most useful pages land under the cap. */
+const sortCandidates = (candidates: StaticDetection['candidates']): StaticDetection['candidates'] =>
+  [...candidates].sort((a, b) => {
+    const aIsIndex = a.path.endsWith('index.html') ? 0 : 1;
+    const bIsIndex = b.path.endsWith('index.html') ? 0 : 1;
+    if (aIsIndex !== bIsIndex) return aIsIndex - bIsIndex;
+    return (a.size ?? 0) - (b.size ?? 0);
+  });
+
+const toInlinedFile = (servedPath: string, repoPath: string, bytes: Uint8Array): InlinedFile => {
+  const ext = extOf(repoPath);
+  const text = TEXT_EXT_TO_CT[ext];
+  if (text) return { servedPath, contentType: text, text: new TextDecoder('utf-8').decode(bytes) };
+  return { servedPath, contentType: BIN_EXT_TO_CT[ext] ?? 'application/octet-stream', bytes };
 };
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
@@ -194,21 +189,20 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
  * through raft-dispatcher (which appends the token + sets the cookie)
  * can see the content.
  */
-export const synthesizeWorker = (result: SynthResult, opts?: { expectedToken?: string }): string => {
+const inlineFileMap = (result: SynthResult): string => {
   const filesObj: Record<string, { ct: string; b: string; bin: boolean }> = {};
   for (const f of result.files) {
-    if (f.bytes) {
-      filesObj[f.servedPath] = { ct: f.contentType, b: bytesToBase64(f.bytes), bin: true };
-    } else {
-      filesObj[f.servedPath] = { ct: f.contentType, b: f.text ?? '', bin: false };
-    }
+    filesObj[f.servedPath] = f.bytes
+      ? { ct: f.contentType, b: bytesToBase64(f.bytes), bin: true }
+      : { ct: f.contentType, b: f.text ?? '', bin: false };
   }
-  const fileMapJson = JSON.stringify(filesObj);
-  const expectedToken = opts?.expectedToken ?? '';
-  return `// Synthesized by Raft for static-mode preview.
-// Files inlined: ${result.files.length} · total bytes: ${result.totalBytes}
-const FILES = ${fileMapJson};
-const EXPECTED_TOKEN = ${JSON.stringify(expectedToken)};
+  return JSON.stringify(filesObj);
+};
+
+const STATIC_WORKER_TEMPLATE = `// Synthesized by Raft for static-mode preview.
+// Files inlined: __FILE_COUNT__ · total bytes: __TOTAL_BYTES__
+const FILES = __FILES__;
+const EXPECTED_TOKEN = __TOKEN__;
 const decode = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 const cookieValue = (header, name) => {
   if (!header) return '';
@@ -246,4 +240,9 @@ export default {
   },
 };
 `;
-};
+
+export const synthesizeWorker = (result: SynthResult, opts?: { expectedToken?: string }): string =>
+  STATIC_WORKER_TEMPLATE.replace('__FILE_COUNT__', String(result.files.length))
+    .replace('__TOTAL_BYTES__', String(result.totalBytes))
+    .replace('__TOKEN__', JSON.stringify(opts?.expectedToken ?? ''))
+    .replace('__FILES__', () => inlineFileMap(result));

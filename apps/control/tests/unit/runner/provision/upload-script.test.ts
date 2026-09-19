@@ -42,7 +42,11 @@ const seedAndContext = async (suffix: string): Promise<StepContext> => {
     uploadTokenHash: 'h',
   });
   if (!repo.ok) throw repo.error;
-  const pe = await createPrEnvironment(env.DB, { repoId: repo.value.id, prNumber: 1, headSha: 'sha' });
+  const pe = await createPrEnvironment(env.DB, {
+    repoId: repo.value.id,
+    prNumber: 1,
+    headSha: 'sha',
+  });
   if (!pe.ok) throw pe.error;
   return {
     env,
@@ -64,7 +68,12 @@ const seedAndContext = async (suffix: string): Promise<StepContext> => {
     propagationDelayMs: 0,
     prior: {
       'load-config': {
-        wrangler: { main_module: 'worker.js', compatibility_date: '2026-04-29', bindings: [], do_classes_to_shard: [] },
+        wrangler: {
+          main_module: 'worker.js',
+          compatibility_date: '2026-04-29',
+          bindings: [],
+          do_classes_to_shard: [],
+        },
         bundleR2Key: 'k',
       },
       'provision-resources': {
@@ -82,7 +91,9 @@ describe('uploadScript — propagation retry', () => {
     const ctx = await seedAndContext('a');
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(cfBindingMissing('10181', "D1 binding 'DB' references database 'X' which was not found"))
+      .mockResolvedValueOnce(
+        cfBindingMissing('10181', "D1 binding 'DB' references database 'X' which was not found"),
+      )
       .mockResolvedValueOnce(cfBindingMissing('10181', 'still propagating'))
       .mockResolvedValueOnce(cfOk({ id: 'raft-up-test-pr-1', etag: 'e1' }))
       // After successful upload, uploadScript calls enableSubdomain.
@@ -111,9 +122,7 @@ describe('uploadScript — propagation retry', () => {
 
   it('does NOT retry on non-propagation 400 — fails immediately', async () => {
     const ctx = await seedAndContext('c');
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(cfBindingMissing('10001', 'invalid script body'));
+    const fetcher = vi.fn().mockResolvedValueOnce(cfBindingMissing('10001', 'invalid script body'));
     ctx.fetcher = fetcher as unknown as typeof fetch;
 
     await expect(uploadScript(ctx)).rejects.toThrow();

@@ -21,7 +21,13 @@ describe('cloudflare/workers', () => {
     const r = await uploadScript(mkClient(fetcher), {
       scriptName: 'raft-x-y-pr-1',
       mainModule: 'worker.js',
-      modules: [{ name: 'worker.js', content: 'export default { fetch(){} }', contentType: 'application/javascript+module' }],
+      modules: [
+        {
+          name: 'worker.js',
+          content: 'export default { fetch(){} }',
+          contentType: 'application/javascript+module',
+        },
+      ],
       compatibilityDate: '2026-04-29',
       bindings: [{ type: 'd1', name: 'DB', id: 'd1-uuid' }],
     });

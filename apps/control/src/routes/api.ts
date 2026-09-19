@@ -12,7 +12,7 @@
  * sliding-window check (100 req/min). Bundle upload uses its own per-repo
  * limit (30/min) keyed by repo id.
  */
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { apiErr, apiOk } from '@raft/shared-types';
 import type { ControlAppEnv } from '../app-env.ts';
@@ -24,17 +24,15 @@ import {
   mintUploadToken,
   verifyUploadToken,
 } from '../lib/auth/upload-token.ts';
-import {
-  listActiveInstallations,
-  getInstallation,
-} from '../lib/db/installations.ts';
+import { listActiveInstallations, getInstallation } from '../lib/db/installations.ts';
 import { getRepo, listReposForInstallation, rotateUploadTokenHash } from '../lib/db/repos.ts';
+import type { Repo } from '../lib/db/types.ts';
 import { getPrEnvironment, listPrEnvironmentsForRepo } from '../lib/db/prEnvironments.ts';
 import { listAuditForInstallation } from '../lib/db/auditLog.ts';
 import type { ProvisionRunner } from '../do/provision-runner.ts';
 import type { TeardownRunner } from '../do/teardown-runner.ts';
-import type { ProvisionRunnerState } from '../runner/provision/state.ts';
-import { buildScriptName } from '../lib/cloudflare/workers.ts';
+import { buildRunnerState } from '../runner/provision/runner-state.ts';
+import { bundleKvKey } from '../lib/bundle-key.ts';
 import { ulid } from '../lib/ids.ts';
 
 const RATE_LIMIT_PER_MIN = 100;
@@ -56,10 +54,18 @@ apiRoutes.use('/api/v1/*', async (c, next) => {
   if (c.req.path === '/api/v1/bundles/upload') return next();
   const session = c.var.session;
   if (!session) return next();
-  const verdict = await checkRateLimit(c.env.CACHE, `op:${session.sub}`, RATE_LIMIT_PER_MIN, RATE_WINDOW_S);
+  const verdict = await checkRateLimit(
+    c.env.CACHE,
+    `op:${session.sub}`,
+    RATE_LIMIT_PER_MIN,
+    RATE_WINDOW_S,
+  );
   c.header('x-ratelimit-remaining', String(verdict.remaining));
   if (!verdict.allowed) {
-    return c.json(apiErr('E_RATE_LIMIT', `rate limit ${RATE_LIMIT_PER_MIN}/min exceeded`, c.var.requestId), 429);
+    return c.json(
+      apiErr('E_RATE_LIMIT', `rate limit ${RATE_LIMIT_PER_MIN}/min exceeded`, c.var.requestId),
+      429,
+    );
   }
   return next();
 });
@@ -74,7 +80,9 @@ apiRoutes.get('/api/v1/installations/:id', async (c) => {
   const { id } = installIdParam.parse(c.req.param());
   const r = await getInstallation(c.env.DB, id);
   if (!r.ok) return c.json(apiErr(r.error.code, r.error.message, c.var.requestId), 500);
-  if (!r.value) return c.json(apiErr('E_NOT_FOUND', 'installation not found', c.var.requestId), 404);
+  if (!r.value) {
+    return c.json(apiErr('E_NOT_FOUND', 'installation not found', c.var.requestId), 404);
+  }
   return c.json(apiOk(r.value, c.var.requestId));
 });
 
@@ -117,9 +125,13 @@ apiRoutes.get('/api/v1/audit/:installationId', async (c) => {
 apiRoutes.post('/api/v1/prs/:prEnvId/teardown', async (c) => {
   const { prEnvId } = prIdParam.parse(c.req.param());
   const pe = await getPrEnvironment(c.env.DB, prEnvId);
-  if (!pe.ok || !pe.value) return c.json(apiErr('E_NOT_FOUND', 'pr env not found', c.var.requestId), 404);
+  if (!pe.ok || !pe.value) {
+    return c.json(apiErr('E_NOT_FOUND', 'pr env not found', c.var.requestId), 404);
+  }
   const repo = await getRepo(c.env.DB, pe.value.repoId);
-  if (!repo.ok || !repo.value) return c.json(apiErr('E_NOT_FOUND', 'repo not found', c.var.requestId), 404);
+  if (!repo.ok || !repo.value) {
+    return c.json(apiErr('E_NOT_FOUND', 'repo not found', c.var.requestId), 404);
+  }
   const stub = c.env.TEARDOWN_RUNNER.get(
     c.env.TEARDOWN_RUNNER.idFromName(prEnvId),
   ) as DurableObjectStub<TeardownRunner>;
@@ -139,33 +151,29 @@ apiRoutes.post('/api/v1/prs/:prEnvId/teardown', async (c) => {
 apiRoutes.post('/api/v1/prs/:prEnvId/redeploy', async (c) => {
   const { prEnvId } = prIdParam.parse(c.req.param());
   const pe = await getPrEnvironment(c.env.DB, prEnvId);
-  if (!pe.ok || !pe.value) return c.json(apiErr('E_NOT_FOUND', 'pr env not found', c.var.requestId), 404);
+  if (!pe.ok || !pe.value) {
+    return c.json(apiErr('E_NOT_FOUND', 'pr env not found', c.var.requestId), 404);
+  }
   const repo = await getRepo(c.env.DB, pe.value.repoId);
-  if (!repo.ok || !repo.value) return c.json(apiErr('E_NOT_FOUND', 'repo not found', c.var.requestId), 404);
-  const installShort = repo.value.installationId.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16);
-  const repoShort = repo.value.fullName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16);
-  const scope = `pr-${pe.value.prNumber}`;
-  const initial: ProvisionRunnerState = {
-    prEnvId,
-    installationId: repo.value.installationId,
-    scope,
-    scriptName: buildScriptName(installShort, repoShort, pe.value.prNumber),
-    previewHostname: `${scope}--${repoShort}.preview.raft`,
-    params: {
+  if (!repo.ok || !repo.value) {
+    return c.json(apiErr('E_NOT_FOUND', 'repo not found', c.var.requestId), 404);
+  }
+  const initial = buildRunnerState(
+    {
       installationId: repo.value.installationId,
       repoFullName: repo.value.fullName,
+      githubRepoId: repo.value.githubRepoId,
+      defaultBranch: repo.value.defaultBranch,
       prNumber: pe.value.prNumber,
       headSha: pe.value.headSha,
+      headRef: '',
       baseSha: '',
       baseBranch: repo.value.defaultBranch,
-      triggerActor: c.var.session?.sub ?? 'manual',
+      actorLogin: c.var.session?.sub ?? 'manual',
     },
-    cursor: 0,
-    status: 'pending',
-    attempts: 0,
-    startedAt: 0,
-    errorHistory: [],
-  };
+    prEnvId,
+    c.env.CF_WORKERS_SUBDOMAIN,
+  );
   const stub = c.env.PROVISION_RUNNER.get(
     c.env.PROVISION_RUNNER.idFromName(prEnvId),
   ) as DurableObjectStub<ProvisionRunner>;
@@ -176,7 +184,9 @@ apiRoutes.post('/api/v1/prs/:prEnvId/redeploy', async (c) => {
 apiRoutes.post('/api/v1/repos/:repoId/rotate-upload-token', async (c) => {
   const { repoId } = repoIdParam.parse(c.req.param());
   const repo = await getRepo(c.env.DB, repoId);
-  if (!repo.ok || !repo.value) return c.json(apiErr('E_NOT_FOUND', 'repo not found', c.var.requestId), 404);
+  if (!repo.ok || !repo.value) {
+    return c.json(apiErr('E_NOT_FOUND', 'repo not found', c.var.requestId), 404);
+  }
   const token = mintUploadToken();
   const hash = await hashUploadToken(token);
   const r = await rotateUploadTokenHash(c.env.DB, repoId, hash);
@@ -193,70 +203,101 @@ apiRoutes.post('/api/v1/repos/:repoId/rotate-upload-token', async (c) => {
 // Modules are base64-encoded so the payload is one self-contained JSON blob —
 // no zip parser needed inside the worker.
 const bundleUploadSchema = z.object({
-  wrangler: z.object({
-    main_module: z.string().optional(),
-    compatibility_date: z.string().optional(),
-    compatibility_flags: z.array(z.string()).optional(),
-    bindings: z.array(z.object({}).passthrough()).optional(),
-  }).passthrough().default({}),
-  modules: z.array(z.object({
-    name: z.string().min(1).max(256),
-    content_b64: z.string().min(1),
-    type: z.string().optional(),
-  })).min(1).max(50),
+  wrangler: z
+    .object({
+      main_module: z.string().optional(),
+      compatibility_date: z.string().optional(),
+      compatibility_flags: z.array(z.string()).optional(),
+      bindings: z.array(z.object({}).passthrough()).optional(),
+    })
+    .passthrough()
+    .default({}),
+  modules: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(256),
+        content_b64: z.string().min(1),
+        type: z.string().optional(),
+      }),
+    )
+    .min(1)
+    .max(50),
 });
 
-apiRoutes.post('/api/v1/bundles/upload', async (c) => {
+interface UploadAuth {
+  repo: Repo;
+  headSha: string;
+}
+
+/** Bearer upload-token auth + per-repo rate limit for the bundle upload endpoint. */
+const authenticateUpload = async (
+  c: Context<ControlAppEnv>,
+): Promise<{ ok: true; value: UploadAuth } | { ok: false; response: Response }> => {
   const auth = c.req.header('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : '';
   const repoId = c.req.header('x-raft-repo-id') ?? '';
   const headSha = c.req.header('x-raft-head-sha') ?? '';
+  const fail = (
+    code: 'E_AUTH' | 'E_NOT_FOUND' | 'E_RATE_LIMIT',
+    msg: string,
+    status: 401 | 404 | 429,
+  ) => ({ ok: false as const, response: c.json(apiErr(code, msg, c.var.requestId), status) });
   if (!isUploadTokenShape(token) || !repoId || !headSha) {
-    return c.json(apiErr('E_AUTH', 'missing/invalid headers', c.var.requestId), 401);
+    return fail('E_AUTH', 'missing/invalid headers', 401);
   }
   const repo = await getRepo(c.env.DB, repoId);
-  if (!repo.ok || !repo.value) return c.json(apiErr('E_NOT_FOUND', 'repo not found', c.var.requestId), 404);
-  const ok = await verifyUploadToken(token, repo.value.uploadTokenHash);
-  if (!ok) return c.json(apiErr('E_AUTH', 'invalid upload token', c.var.requestId), 401);
-  const verdict = await checkRateLimit(c.env.CACHE, `up:${repoId}`, 30, 60);
-  if (!verdict.allowed) {
-    return c.json(apiErr('E_RATE_LIMIT', '30 uploads/min exceeded', c.var.requestId), 429);
+  if (!repo.ok || !repo.value) return fail('E_NOT_FOUND', 'repo not found', 404);
+  if (!(await verifyUploadToken(token, repo.value.uploadTokenHash))) {
+    return fail('E_AUTH', 'invalid upload token', 401);
   }
+  const verdict = await checkRateLimit(c.env.CACHE, `up:${repoId}`, 30, 60);
+  if (!verdict.allowed) return fail('E_RATE_LIMIT', '30 uploads/min exceeded', 429);
+  return { ok: true, value: { repo: repo.value, headSha } };
+};
 
-  // Parse + validate JSON payload.
+/** Parse + validate the JSON bundle body; repack with ingestion timestamp + byte count. */
+const parseBundlePayload = async (
+  c: Context<ControlAppEnv>,
+): Promise<{ ok: true; json: string; modules: number } | { ok: false; response: Response }> => {
   let raw: unknown;
   try {
     raw = await c.req.json();
   } catch {
-    return c.json(apiErr('E_VALIDATION', 'invalid JSON', c.var.requestId), 400);
+    return {
+      ok: false,
+      response: c.json(apiErr('E_VALIDATION', 'invalid JSON', c.var.requestId), 400),
+    };
   }
   const parsed = bundleUploadSchema.safeParse(raw);
   if (!parsed.success) {
-    return c.json(apiErr('E_VALIDATION', `bad payload: ${parsed.error.message}`, c.var.requestId), 400);
+    const msg = `bad payload: ${parsed.error.message}`;
+    return { ok: false, response: c.json(apiErr('E_VALIDATION', msg, c.var.requestId), 400) };
   }
-
-  // Repack with timestamps so the runner / dashboard can show ingestion ts.
-  const payload = {
+  const json = JSON.stringify({
     ...parsed.data,
     uploadedAt: Math.floor(Date.now() / 1000),
     bytes: parsed.data.modules.reduce((s, m) => s + m.content_b64.length, 0),
-  };
-  const json = JSON.stringify(payload);
+  });
   if (json.length > 24 * 1024 * 1024) {
-    return c.json(apiErr('E_VALIDATION', 'bundle exceeds 24MB KV cap', c.var.requestId), 413);
+    const msg = 'bundle exceeds 24MB KV cap';
+    return { ok: false, response: c.json(apiErr('E_VALIDATION', msg, c.var.requestId), 413) };
   }
+  return { ok: true, json, modules: parsed.data.modules.length };
+};
+
+apiRoutes.post('/api/v1/bundles/upload', async (c) => {
+  const authed = await authenticateUpload(c);
+  if (!authed.ok) return authed.response;
+  const { repo, headSha } = authed.value;
+  const body = await parseBundlePayload(c);
+  if (!body.ok) return body.response;
+  const { json } = body;
 
   const id = ulid();
-  // KV key MUST mirror runner/provision/steps.ts `bundleKvKey()`.
-  const key = `bundle:${repo.value.installationId}:${repo.value.fullName}:${headSha}`;
+  const key = bundleKvKey(repo.installationId, repo.fullName, headSha);
   await c.env.BUNDLES_KV.put(key, json, {
-    metadata: { id, headSha, repoId, modules: parsed.data.modules.length, bytes: json.length },
+    metadata: { id, headSha, repoId: repo.id, modules: body.modules, bytes: json.length },
     expirationTtl: 14 * 86400,
   });
-  return c.json(apiOk({
-    id,
-    key,
-    modules: parsed.data.modules.length,
-    bytes: json.length,
-  }, c.var.requestId));
+  return c.json(apiOk({ id, key, modules: body.modules, bytes: json.length }, c.var.requestId));
 });

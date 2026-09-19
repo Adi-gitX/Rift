@@ -43,3 +43,6 @@ export const verifyUploadToken = async (
   }
   return diff === 0;
 };
+
+/** Hash of a freshly minted token whose plaintext is discarded — used to seed new repo rows. */
+export const mintUploadTokenHash = (): Promise<string> => hashUploadToken(mintUploadToken());

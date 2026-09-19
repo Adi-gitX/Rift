@@ -8,13 +8,10 @@ import { hexToBytes } from './hex.ts';
 const enc = new TextEncoder();
 
 const importKey = (secret: string): Promise<CryptoKey> =>
-  crypto.subtle.importKey(
-    'raw',
-    enc.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign', 'verify'],
-  );
+  crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ]);
 
 export const hmacSha256Hex = async (secret: string, payload: string): Promise<string> => {
   const key = await importKey(secret);

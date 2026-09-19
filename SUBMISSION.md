@@ -39,14 +39,14 @@ Both end-to-end verified against real Cloudflare resources (see §3 Impact / Met
 |---|---|
 | **Workers** | 3 deployable Workers: `raft-control`, `raft-dispatcher`, `raft-tail` |
 | **Workers Static Assets** | Dashboard SPA shipped inside `raft-control` (`run_worker_first: true`) |
-| **D1** | `raft-meta` for installations / repos / PR envs / audit; per-PR forks via export+import REST API |
+| **D1** | `raft-meta` for installations / repos / PR envs / audit; per-PR forks of the customer's base DB via export+import; PR migrations applied + schema diffed via the `/query` REST API |
 | **KV** | `CACHE` (rate limits, install-token cache), `ROUTES` (path → user-worker lookup), `BUNDLES_KV` (bundle blobs) |
 | **Queues** | `raft-events` (decouple webhook receipt from provisioning) + `raft-tail-events` (Tail fan-out) |
 | **Durable Objects** | 5 classes — `RepoCoordinator`, `PrEnvironment`, `ProvisionRunner`, `TeardownRunner`, `LogTail` |
 | **DO Alarms** | Replaces paid Cloudflare Workflows — alarm-driven step machines with backoff |
-| **Hibernatable WebSockets** | Live log streaming to dashboard, no connection-time billing |
+| **Hibernatable WebSockets** | `LogTail` DO WS endpoint for live fan-out; the SPA polls runner state every 2 s today |
 | **Cron Triggers** | Daily 04:00 UTC sweep of idle PR environments |
-| **Workers Tail** | `raft-tail` Worker consumes user-worker trace events into a Queue |
+| **Workers Tail** | `raft-tail` Worker deployed; attaching it to per-PR scripts needs Workers Paid (CF 100150), so it is not yet fed on the free tier |
 | **Workers Logs** | Native log viewer (Logpush is paid; this is the free substitute) |
 
 ### Why Cloudflare
@@ -73,7 +73,7 @@ flowchart LR
   CTL -->|enqueue| EVQ[(raft-events Queue)]
   EVQ --> CTL
   CTL --> REPO[RepoCoordinator DO]
-  REPO --> PROV[ProvisionRunner DO<br/>7-step alarm machine]
+  REPO --> PROV[ProvisionRunner DO<br/>9-step alarm machine]
   REPO --> TEAR[TeardownRunner DO<br/>9-step alarm machine]
 
   PROV -->|CF REST API| CFR[Cloudflare API<br/>D1 · KV · Queues · Workers]
@@ -104,7 +104,7 @@ The PRD calls for two paid products. Raft substitutes both behind thin abstracti
 | Logpush | `raft-tail` Worker + per-PR Workers Logs deep-link from dashboard | Lose 30-day R2 retention; gain $0 cost |
 | Cloudflare Access | Signed-cookie auth (HMAC-SHA256) for the operator dashboard; per-scope HMAC token gates static-synth previews | One-operator demo auth + per-PR token |
 
-### Provisioning machine — 7 idempotent steps
+### Provisioning machine — 9 idempotent steps
 
 Every step is idempotent. If the alarm fires twice, cached results short-circuit. If a step throws, the alarm reschedules with backoff (1s → 2s → 4s → 8s → 16s, max 5 attempts). If the PR is closed mid-provision, the runner aborts cleanly and the teardown machine picks up only what got created. Per-step `started_at`/`finished_at` are persisted so the dashboard latency chart is truthful.
 
@@ -114,7 +114,9 @@ stateDiagram-v2
   load_config --> await_bundle: SUCCESS<br/>(detect customer-bundle / static / fallback)
   await_bundle --> provision_resources: SUCCESS<br/>(poll BUNDLES_KV, ≤5min — no-op for static / fallback)
   provision_resources --> fork_base_db: SUCCESS<br/>(D1 + KV + Queue, list-then-create idempotent)
-  fork_base_db --> rewrite_bundle: SUCCESS<br/>(export base D1 → import — no-op without base)
+  fork_base_db --> apply_migrations: SUCCESS<br/>(export base D1 → import — no-op without base)
+  apply_migrations --> snapshot_schema: SUCCESS<br/>(pending migrations/*.sql on the fork; SQL errors recorded)
+  snapshot_schema --> rewrite_bundle: SUCCESS<br/>(fork vs base schema diff + destructive scan)
   rewrite_bundle --> upload_script: SUCCESS<br/>(binding IDs swapped, DO wrappers codegened)
   upload_script --> route_and_comment: SUCCESS<br/>(PUT /workers/scripts/{name} + enable subdomain)
   route_and_comment --> ready: SUCCESS<br/>(ROUTES KV + sticky PR comment + live probe)
@@ -140,7 +142,7 @@ Measured against the live deployment with a real GitHub App and real Cloudflare 
 |---|---|---|---|
 | Provision: PR opened → preview URL | <90s | **<2s** static-synth · **<1s** when bundle pre-uploaded | **45-90× better** |
 | Teardown: PR closed → all resources gone | <30s | **<30s** | ✅ on target |
-| Provision steps | 7 | 7 | ✅ each cached + idempotent + per-step timed |
+| Provision steps | 7 | 9 | ✅ each cached + idempotent + per-step timed (+ apply-migrations, snapshot-schema) |
 | Teardown steps | 9 | 9 | ✅ CF 404 = already-gone (idempotent re-runs are safe) |
 | Deployment modes verified | 3 | 3 | ✅ customer-bundle, static-synth, placeholder all live |
 | Per-PR Cloudflare resources | D1 + KV + Queue + Worker (+ DO shard) | 4 + 1 | ✅ verified live by cross-checking CF REST API |
@@ -148,7 +150,7 @@ Measured against the live deployment with a real GitHub App and real Cloudflare 
 | Cost to operate | $0 | **$0** | ✅ no paid CF products |
 | Cost to install | $0 | **$0** | ✅ no customer infra |
 | Free-tier headroom | — | live counts in dashboard | ~95 concurrent PR envs supported |
-| Tests passing | 80+ | **105** | ✅ 25 files, 105 tests, all green |
+| Tests passing | 80+ | **146** | ✅ 34 files, 146 tests, all green |
 | TypeScript | strict, no `any` | strict, no `any` | ✅ enforced by ESLint |
 | File / function caps | <300 / <40 lines | <300 / <40 lines | ✅ enforced by ESLint |
 
@@ -209,12 +211,12 @@ For `customer-bundle` mode the `await-bundle` step waits for the GH Action's POS
 
 Raft gives Cloudflare Workers teams the per-PR preview-environment workflow Vercel and Netlify popularized — designed from the ground up around Cloudflare primitives, with full data-layer isolation no other platform can match.
 
-A team installs the Raft GitHub App on a Workers repository. When a developer opens a PR, Raft auto-detects which of three deployment modes applies and provisions a complete isolated stack within seconds: a fresh D1 database (optionally forked from base via the export/import REST API), a dedicated KV namespace, its own Queue, a sharded Durable Object namespace, and a uniquely-named Worker script. The PR's code is bundled, binding IDs are rewritten on the fly, the script is uploaded directly via `PUT /workers/scripts/{name}`, and a sticky comment with the preview URL appears on the PR — including a live HTTP probe and an opt-in Claude-written 3-bullet review. Reviewers click and see a fully isolated environment; their writes never touch staging. When the PR closes, every resource is destroyed within thirty seconds, idempotently.
+A team installs the Raft GitHub App on a Workers repository. When a developer opens a PR, Raft auto-detects which of three deployment modes applies and provisions a complete isolated stack within seconds: a fresh D1 database (optionally forked from base via the export/import REST API), a dedicated KV namespace, its own Queue, a sharded Durable Object namespace, and a uniquely-named Worker script. The PR's code is bundled, binding IDs are rewritten on the fly, the script is uploaded directly via `PUT /workers/scripts/{name}`, and a sticky comment with the preview URL appears on the PR — including a live HTTP probe and a Database section showing which migrations ran on the fork and how the schema differs from base. Reviewers click and see a fully isolated environment; their writes never touch staging. When the PR closes, every resource is destroyed within thirty seconds, idempotently.
 
 Three modes work end-to-end today: `customer-bundle` for repos with `wrangler.jsonc` plus a one-line GitHub Action, `static-synth` for repos with `index.html` (no customer setup at all — Raft synthesizes a Worker that serves the inlined files), and `placeholder` as a graceful fallback.
 
-The orchestration runs on **Durable Object Alarms** rather than paid Cloudflare Workflows. Each runner is an explicit 7-step machine with a cursor in DO storage, per-step cached results, and per-step `started_at`/`finished_at` timestamps that feed a truthful latency chart on the dashboard. Three Workers participate: `raft-control` (webhook ingress with `delivery_id` dedup, Hono API, dashboard SPA, daily cron sweep + alerting, every DO), `raft-dispatcher` (path-based router that 302-redirects through an HMAC-gated query token), and `raft-tail` (free-tier Logpush substitute).
+The orchestration runs on **Durable Object Alarms** rather than paid Cloudflare Workflows. Each runner is an explicit 9-step machine with a cursor in DO storage, per-step cached results, and per-step `started_at`/`finished_at` timestamps that feed a truthful latency chart on the dashboard. Three Workers participate: `raft-control` (webhook ingress with `delivery_id` dedup, Hono API, dashboard SPA, daily cron sweep + alerting, every DO), `raft-dispatcher` (path-based router that 302-redirects through an HMAC-gated query token), and `raft-tail` (free-tier Logpush substitute).
 
-Verified live against real Cloudflare resources: PR-opened → ready preview in **<2 seconds** (PRD target 90s, customer-bundle mode picks up the upload and reaches ready in **<1s** of additional time). PR-closed → all four CF resources confirmed deleted in **<30 seconds**, cross-checked directly against the Cloudflare REST API. 105/105 tests green. Zero paid Cloudflare products. Zero customer-side infrastructure beyond a single `.github/workflows/raft-bundle.yml` paste (and even that is optional for HTML-only repos).
+Verified live against real Cloudflare resources: PR-opened → ready preview in **<2 seconds** (PRD target 90s, customer-bundle mode picks up the upload and reaches ready in **<1s** of additional time). PR-closed → all four CF resources confirmed deleted in **<30 seconds**, cross-checked directly against the Cloudflare REST API. 146/146 tests green. Zero paid Cloudflare products. Zero customer-side infrastructure beyond a single `.github/workflows/raft-bundle.yml` paste (and even that is optional for HTML-only repos).
 
 Built end-to-end on free-tier Cloudflare. Zero paid products. Zero customer infrastructure beyond their existing repo. **This product can't exist on any other cloud.**

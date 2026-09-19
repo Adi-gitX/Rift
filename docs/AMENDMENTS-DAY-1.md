@@ -319,3 +319,49 @@ and a live HTTP probe — no AI.
   inside vitest-pool-workers.
 
 *End of Day-2 amendments.*
+
+---
+
+# Day-3 changes (v0.3.0)
+
+## D11 — D1 branching + migration preview
+**Affected**: PRD §9 (new steps), §12.
+
+Two new provision steps between `fork-base-db` and `rewrite-bundle`:
+`apply-migrations` runs the PR's pending `migrations/*.sql` on the forked D1
+via `POST /d1/database/{id}/query` (bookkeeping in wrangler's own
+`d1_migrations` table, so base history is honoured); `snapshot-schema`
+diffs fork vs base (`sqlite_master`, `PRAGMA table_info`, `COUNT(*)`) and
+scans for destructive statements. Base D1 is auto-detected from
+`wrangler.{jsonc,json,toml}` `d1_databases[0]` at head SHA (top-level env
+only). SQL errors are recorded, never thrown — the Worker preview still
+ships and the PR comment shows the SQLite message. Writes use `noRetry`
+because CFClient retries POSTs and DDL is not idempotent. Both steps are
+SHA-dependent (re-run on synchronize); the fork stays one-shot.
+Library: `apps/control/src/lib/d1-migrations/`. Tests run against an
+in-memory fake D1 (`tests/fake-d1.ts`) + fake GitHub (`tests/fake-github.ts`).
+
+## D12 — Orphan reconciler
+`scheduled/reconcile.ts` lists account Workers/D1/KV/Queues matching
+`raft-<install>-<repo>-pr-<n>[-db|-kv|-q]`, and deletes those whose PR env
+row is `torn_down`/`failed` (cron, daily) or has no row (`force=1`, manual
+`POST /api/v1/admin/reconcile`). Motivated by a live orphan (pr-8) whose
+teardown succeeded while a redeploy re-created resources.
+
+## D13 — Compensating teardown on provision failure
+`ProvisionRunner.markFailed` now starts a `TeardownRunner` with
+`reason: 'failed'` (skipped when the failure was an abort because the env
+was already terminal). Closes the `TODO(raft:slice-E)`.
+
+## D14 — Fixes
+- `purge-bundle-kv` deleted a key that never existed; now uses the shared
+  `bundleKvKey(installation, repo, headSha)` (`lib/bundle-key.ts`).
+- Preview hostname built from `CF_WORKERS_SUBDOMAIN` (was hard-coded);
+  webhook and manual-redeploy paths share `runner-state.ts`.
+- Repo rows get a real random upload-token hash instead of the
+  `pending-rotation` placeholder; the plaintext is obtained via Rotate.
+- Demo GitHub Action posts JSON, not a zip, matching the upload endpoint;
+  tolerates wrangler builds that emit no `dist/wrangler.json`.
+- `steps.ts` split into `steps/*.ts` so the 300-line / 40-line ESLint caps
+  hold; lint, prettier, typecheck and tests are all green in CI.
+- D1 reserve in the quota guard raised to 2 (raft-meta + customer base DB).

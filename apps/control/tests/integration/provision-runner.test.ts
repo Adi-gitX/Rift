@@ -1,5 +1,5 @@
 /**
- * Slice D integration test: ProvisionRunner DO walks all 5 (v1) steps via DO
+ * ProvisionRunner DO walks every step in STEP_ORDER via DO
  * alarms, calls the CF API in the right order (intercepted by miniflare's
  * outboundService — see tests/cf-api-mock.ts), lands the PR env in `ready`,
  * and writes the hostname → script_name route into ROUTES KV.
@@ -47,7 +47,7 @@ const driveAlarms = async (
   return runInDurableObject(stub, async (instance: ProvisionRunner) => instance.getStateSnapshot());
 };
 
-describe('Slice D ProvisionRunner — alarm-driven 5-step machine', () => {
+describe('ProvisionRunner — alarm-driven step machine', () => {
   it('walks all steps to succeeded, writes ROUTES KV, transitions PR env to ready', async () => {
     const prEnvId = await seedRepo('a');
     const stub = env.PROVISION_RUNNER.get(

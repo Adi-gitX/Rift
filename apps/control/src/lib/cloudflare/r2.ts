@@ -29,7 +29,9 @@ export const setLifecycleRule = (
             id: rule.id,
             enabled: rule.enabled,
             conditions: { prefix: rule.prefix },
-            deleteObjectsTransition: { condition: { type: 'Age', maxAge: rule.conditions.age_seconds } },
+            deleteObjectsTransition: {
+              condition: { type: 'Age', maxAge: rule.conditions.age_seconds },
+            },
           },
         ],
       },
@@ -45,9 +47,8 @@ export const purgePrefix = async (
   let deleted = 0;
   let cursor: string | undefined;
   for (;;) {
-    const opts: R2ListOptions = cursor === undefined
-      ? { prefix, limit: 1000 }
-      : { prefix, limit: 1000, cursor };
+    const opts: R2ListOptions =
+      cursor === undefined ? { prefix, limit: 1000 } : { prefix, limit: 1000, cursor };
     const list = await bucket.list(opts);
     if (list.objects.length === 0) break;
     await bucket.delete(list.objects.map((o) => o.key));

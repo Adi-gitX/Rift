@@ -30,22 +30,24 @@ const readFreeTier = async (env: Env): Promise<FreeTierSnapshot> => {
   const cp = { workers: 3, d1: 1, kv: 3, queues: 3 };
   return {
     workers: { used: (counts?.w ?? 0) + cp.workers, cap: 100 },
-    d1:      { used: (counts?.d ?? 0) + cp.d1,      cap: 10 },
-    kv:      { used: (counts?.k ?? 0) + cp.kv,      cap: 1000 },
-    queues:  { used: (counts?.q ?? 0) + cp.queues,  cap: 10 },
+    d1: { used: (counts?.d ?? 0) + cp.d1, cap: 10 },
+    kv: { used: (counts?.k ?? 0) + cp.kv, cap: 1000 },
+    queues: { used: (counts?.q ?? 0) + cp.queues, cap: 10 },
   };
 };
 
 const findStuckProvisioning = async (
   env: Env,
   cutoffSeconds: number,
-): Promise<Array<{ id: string; pr_number: number; last_activity_at: number | null }>> => {
+): Promise<{ id: string; pr_number: number; last_activity_at: number | null }[]> => {
   const r = await env.DB.prepare(
     `SELECT id, pr_number, last_activity_at
        FROM pr_environments
       WHERE state IN ('provisioning','pending','updating')
         AND last_activity_at < ?`,
-  ).bind(cutoffSeconds).all<{ id: string; pr_number: number; last_activity_at: number | null }>();
+  )
+    .bind(cutoffSeconds)
+    .all<{ id: string; pr_number: number; last_activity_at: number | null }>();
   return r.results ?? [];
 };
 
@@ -69,18 +71,20 @@ const postWebhook = async (
   }
 };
 
-export const runAlertChecks = async (env: Env): Promise<void> => {
-  const log = new Logger({ component: 'cron.alerts' });
-
-  // 1) Free-tier capacity. Only fire when one of the binding caps (D1 or
-  //    Queues — they cap at 10 so they're the realistic risk) exceeds 80%.
+/** 1) Free-tier capacity: fire when any slot exceeds 80% (D1 / Queues cap at 10 — the real risk). */
+const checkFreeTier = async (env: Env, log: Logger): Promise<number> => {
   const ft = await readFreeTier(env);
-  const slots: Array<[string, { used: number; cap: number }]> = [
-    ['Workers', ft.workers], ['D1 dbs', ft.d1], ['KV namespaces', ft.kv], ['Queues', ft.queues],
+  const slots: [string, { used: number; cap: number }][] = [
+    ['Workers', ft.workers],
+    ['D1 dbs', ft.d1],
+    ['KV namespaces', ft.kv],
+    ['Queues', ft.queues],
   ];
   const hot = slots.filter(([, s]) => s.cap > 0 && s.used / s.cap >= 0.8);
   if (hot.length > 0) {
-    const summary = hot.map(([name, s]) => `${name} ${s.used}/${s.cap} (${Math.round((s.used / s.cap) * 100)}%)`).join(' · ');
+    const summary = hot
+      .map(([name, s]) => `${name} ${s.used}/${s.cap} (${Math.round((s.used / s.cap) * 100)}%)`)
+      .join(' · ');
     await postWebhook(
       env,
       `:warning: Raft free-tier near cap — ${summary}`,
@@ -88,6 +92,12 @@ export const runAlertChecks = async (env: Env): Promise<void> => {
       log,
     );
   }
+  return hot.length;
+};
+
+export const runAlertChecks = async (env: Env): Promise<void> => {
+  const log = new Logger({ component: 'cron.alerts' });
+  const hotCount = await checkFreeTier(env, log);
 
   // 2) Stuck provisioning. Anything in pending / provisioning / updating with
   //    last_activity_at older than 5 minutes is suspicious — runner may have
@@ -98,13 +108,19 @@ export const runAlertChecks = async (env: Env): Promise<void> => {
     await postWebhook(
       env,
       `:rotating_light: ${stuck.length} PR env(s) stuck > 5min in pre-ready state`,
-      { stuck: stuck.map((s) => ({ id: s.id, pr: s.pr_number, last_activity_at: s.last_activity_at })) },
+      {
+        stuck: stuck.map((s) => ({
+          id: s.id,
+          pr: s.pr_number,
+          last_activity_at: s.last_activity_at,
+        })),
+      },
       log,
     );
   }
 
   log.info('alert_checks_done', {
-    free_tier_hot: hot.length,
+    free_tier_hot: hotCount,
     stuck_count: stuck.length,
     webhook_configured: !!env.RAFT_ALERT_WEBHOOK,
   });

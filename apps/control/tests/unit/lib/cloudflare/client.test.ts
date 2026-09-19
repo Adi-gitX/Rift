@@ -8,8 +8,7 @@ const cfOk = (result: unknown): Response =>
     headers: { 'content-type': 'application/json' },
   });
 
-const cfFail = (code: number, body = 'oops'): Response =>
-  new Response(body, { status: code });
+const cfFail = (code: number, body = 'oops'): Response => new Response(body, { status: code });
 
 const sampleSchema = z.object({ id: z.string() });
 
@@ -73,7 +72,12 @@ describe('CFClient.req', () => {
   it('handles envelope success=false as a non-retried failure', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(
       new Response(
-        JSON.stringify({ success: false, errors: [{ code: 7000, message: 'denied' }], messages: [], result: null }),
+        JSON.stringify({
+          success: false,
+          errors: [{ code: 7000, message: 'denied' }],
+          messages: [],
+          result: null,
+        }),
         { status: 200 },
       ),
     );
