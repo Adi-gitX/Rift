@@ -19,6 +19,9 @@ export const d1DatabaseSchema = z.object({
   uuid: z.string(),
   name: z.string(),
   created_at: z.string().optional(),
+  /** Bytes on disk; present on GET /d1/database/{id}. */
+  file_size: z.number().optional(),
+  num_tables: z.number().optional(),
 });
 export type D1DatabaseShape = z.infer<typeof d1DatabaseSchema>;
 

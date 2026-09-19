@@ -14,7 +14,7 @@ import type { LoadConfigResult, RouteAndCommentResult } from './types.ts';
  * traffic (not just that ROUTES KV got written).
  */
 const probeLivePreview = async (ctx: StepContext): Promise<LiveProbe | null> => {
-  const url = `https://${ctx.scriptName}.${ctx.env.CF_WORKERS_SUBDOMAIN}/`;
+  const url = `https://${ctx.scriptName}.${ctx.cf.workersSubdomain}/`;
   const t0 = Date.now();
   try {
     const r = await fetch(url, { redirect: 'manual' });
@@ -61,7 +61,12 @@ export const routeAndComment = async (ctx: StepContext): Promise<RouteAndComment
   // Path-based route used by raft-dispatcher (free-tier: no wildcard subdomain).
   const routeKey = `route:${ctx.scope}`;
   await ctx.env.ROUTES.put(routeKey, ctx.scriptName, {
-    metadata: { installationId: ctx.params.installationId, prNumber: ctx.params.prNumber },
+    // `host` lets the dispatcher redirect into a tenant's own workers.dev subdomain.
+    metadata: {
+      installationId: ctx.params.installationId,
+      prNumber: ctx.params.prNumber,
+      host: `${ctx.scriptName}.${ctx.cf.workersSubdomain}`,
+    },
   });
   // Reverse index used by the tail-events queue consumer to map script → PR env.
   await ctx.env.ROUTES.put(`script:${ctx.scriptName}:pr`, ctx.prEnvId);

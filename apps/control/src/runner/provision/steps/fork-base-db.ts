@@ -13,6 +13,11 @@
  * duplicate rows and conflict with migrations already applied.
  */
 import * as cfD1 from '../../../lib/cloudflare/d1.ts';
+import {
+  chooseForkMode,
+  forkCapBytes,
+  type ForkMode,
+} from '../../../lib/d1-migrations/fork-mode.ts';
 import { getRepo, repoIdOf } from '../../../lib/db/repos.ts';
 import { md5Hex } from '../../../lib/crypto/md5.ts';
 import { cfClientFromCtx, requirePrior, type StepContext } from './context.ts';
@@ -46,7 +51,8 @@ export const forkBaseDb = async (ctx: StepContext): Promise<ForkBaseDbResult> =>
   }
   // Failures (source missing, export timeout, rate limit) are non-fatal —
   // degrade to "empty per-PR DB" rather than failing the whole provision.
-  const copied = await copyDatabase(ctx, base.id, provisioned.d1.database_id);
+  const plan = await planFork(ctx, base.id);
+  const copied = await copyDatabase(ctx, base.id, provisioned.d1.database_id, plan.mode);
   if (!copied.ok) {
     ctx.log.warn('fork_base_db_degrading', { base: base.id, reason: copied.reason });
     return { source: 'skipped', baseDatabaseId: base.id, reason: copied.reason };
@@ -55,14 +61,34 @@ export const forkBaseDb = async (ctx: StepContext): Promise<ForkBaseDbResult> =>
     base: base.id,
     target: provisioned.d1.database_id,
     sql_bytes: copied.sqlBytes,
+    mode: plan.mode,
   });
   const result: ForkBaseDbResult = {
     source: 'forked',
+    mode: plan.mode,
     baseDatabaseId: base.id,
     sqlBytes: copied.sqlBytes,
   };
+  if (plan.baseSizeBytes !== undefined) result.baseSizeBytes = plan.baseSizeBytes;
   if (base.name) result.baseDatabaseName = base.name;
   return result;
+};
+
+/** Full copy under the cap; schema-only above it (cap from repo config, default 100 MB). */
+const planFork = async (
+  ctx: StepContext,
+  baseId: string,
+): Promise<{ mode: ForkMode; baseSizeBytes?: number }> => {
+  const repoRow = await getRepo(
+    ctx.env.DB,
+    repoIdOf(ctx.params.installationId, ctx.params.repoFullName),
+  );
+  const cap = forkCapBytes(repoRow.ok ? repoRow.value?.raftConfig : undefined);
+  const info = await cfD1.getDatabase(cfClientFromCtx(ctx), baseId);
+  const size = info.ok ? info.value.file_size : undefined;
+  const mode = chooseForkMode(size, cap);
+  if (mode === 'schema-only') ctx.log.warn('fork_base_db_schema_only', { size, cap });
+  return size === undefined ? { mode } : { mode, baseSizeBytes: size };
 };
 
 /** Export `from` to SQL, import into `to`. Returns a reason string on either failure. */
@@ -70,9 +96,10 @@ const copyDatabase = async (
   ctx: StepContext,
   from: string,
   to: string,
+  mode: ForkMode,
 ): Promise<{ ok: true; sqlBytes: number } | { ok: false; reason: string }> => {
   const client = cfClientFromCtx(ctx);
-  const sql = await cfD1.exportSqlAndWait(client, from);
+  const sql = await cfD1.exportSqlAndWait(client, from, { schemaOnly: mode === 'schema-only' });
   if (!sql.ok) return { ok: false, reason: `export_failed: ${sql.error.message}` };
   // D1 import validates the etag as the MD5 of the uploaded file.
   const etag = md5Hex(sql.value);

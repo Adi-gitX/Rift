@@ -10,7 +10,7 @@ import { Hono } from 'hono';
 import { apiErr, apiOk } from '@raft/shared-types';
 import type { ControlAppEnv } from '../app-env.ts';
 import { requireAuth } from '../middleware/require-auth.ts';
-import { listActiveInstallations } from '../lib/db/installations.ts';
+import { listActiveInstallations, publicInstallation } from '../lib/db/installations.ts';
 import { getRepo, listReposForInstallation } from '../lib/db/repos.ts';
 import { getPrEnvironment, listPrEnvironmentsForRepo } from '../lib/db/prEnvironments.ts';
 import { listAuditForInstallation, listAuditForTarget } from '../lib/db/auditLog.ts';
@@ -39,7 +39,7 @@ dashboardApi.get('/api/me', async (c) => {
       {
         email: session.sub,
         exp: session.exp,
-        installations: installs.ok ? installs.value : [],
+        installations: installs.ok ? installs.value.map(publicInstallation) : [],
         // Surface the GitHub App identity so the SPA can build the
         // "Install on a repo" deep-link without hard-coding the name.
         githubApp: {

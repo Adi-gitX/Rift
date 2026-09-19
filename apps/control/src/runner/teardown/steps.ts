@@ -18,18 +18,20 @@ import { getRepo } from '../../lib/db/repos.ts';
 import { bundleKvKey } from '../../lib/bundle-key.ts';
 import type { PrEnvironment } from '../../lib/db/types.ts';
 import type { Env } from '../../env.ts';
+import type { CloudflareCredentials } from '../../lib/tenant.ts';
 
 export interface TeardownStepContext {
   env: Env;
   prEnvId: string;
   installationId: string;
   log: Logger;
+  cf: CloudflareCredentials;
 }
 
 const cfClient = (ctx: TeardownStepContext): CFClient =>
   new CFClient({
-    accountId: ctx.env.CF_OWN_ACCOUNT_ID,
-    token: ctx.env.CF_API_TOKEN,
+    accountId: ctx.cf.accountId,
+    token: ctx.cf.token,
     fetcher: globalThis.fetch.bind(globalThis),
     logger: ctx.log,
     baseDelayMs: 50,

@@ -60,6 +60,17 @@ export const findOrCreateDatabase = async (
   return create;
 };
 
+export const getDatabase = (
+  client: CFClient,
+  id: string,
+): Promise<Result<D1DatabaseShape, CodedError>> =>
+  client.req({ method: 'GET', path: `/d1/database/${id}` }, d1DatabaseSchema);
+
+export interface ExportOptions {
+  /** Schema only — `dump_options.no_data`. Used when the base exceeds the fork size cap. */
+  schemaOnly?: boolean;
+}
+
 export const deleteDatabase = (
   client: CFClient,
   id: string,
@@ -72,9 +83,17 @@ export const deleteDatabase = (
 export const startExport = (
   client: CFClient,
   id: string,
+  opts: ExportOptions = {},
 ): Promise<Result<D1ExportPollShape, CodedError>> =>
   client.req(
-    { method: 'POST', path: `/d1/database/${id}/export`, body: { output_format: 'polling' } },
+    {
+      method: 'POST',
+      path: `/d1/database/${id}/export`,
+      body: {
+        output_format: 'polling',
+        ...(opts.schemaOnly ? { dump_options: { no_data: true } } : {}),
+      },
+    },
     d1ExportPollSchema,
   );
 
@@ -178,8 +197,9 @@ export const importSqlAndWait = async (
 export const exportSqlAndWait = async (
   client: CFClient,
   databaseId: string,
+  opts: ExportOptions = {},
 ): Promise<Result<string, CodedError>> => {
-  const start = await startExport(client, databaseId);
+  const start = await startExport(client, databaseId, opts);
   if (!start.ok) return err(start.error);
   let current = start.value;
   let attempts = 0;

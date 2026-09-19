@@ -28,6 +28,13 @@ const post = async (path, body) => {
   return r.json();
 };
 
+const del = async (path) => {
+  const r = await fetch(path, { method: "DELETE", credentials: "same-origin" });
+  if (r.status === 401 && typeof window !== "undefined") { window.location.href = "/login"; return null; }
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${path}`);
+  return r.json();
+};
+
 export const api = {
   me:                 () => get("/api/me"),
   stats:              () => get("/api/stats"),
@@ -42,6 +49,9 @@ export const api = {
   teardownRunnerState:(id) => get(`/api/pr-environments/${encodeURIComponent(id)}/teardown-runner`),
   audit:              () => get("/api/audit"),
   rotateUploadToken:  (repoId) => post(`/api/v1/repos/${encodeURIComponent(repoId)}/rotate-upload-token`),
+  connectCloudflare:  (installId, body) => post(`/api/v1/installations/${encodeURIComponent(installId)}/cloudflare`, body),
+  disconnectCloudflare: (installId) => del(`/api/v1/installations/${encodeURIComponent(installId)}/cloudflare`),
+  reconcile:          (dryRun = true) => post(`/api/v1/admin/reconcile?dry_run=${dryRun ? 1 : 0}`),
   teardown:           (prEnvId) => post(`/api/v1/prs/${encodeURIComponent(prEnvId)}/teardown`),
   redeploy:           (prEnvId) => post(`/api/v1/prs/${encodeURIComponent(prEnvId)}/redeploy`),
 };

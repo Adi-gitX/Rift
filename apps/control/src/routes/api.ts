@@ -24,7 +24,11 @@ import {
   mintUploadToken,
   verifyUploadToken,
 } from '../lib/auth/upload-token.ts';
-import { listActiveInstallations, getInstallation } from '../lib/db/installations.ts';
+import {
+  listActiveInstallations,
+  getInstallation,
+  publicInstallation,
+} from '../lib/db/installations.ts';
 import { getRepo, listReposForInstallation, rotateUploadTokenHash } from '../lib/db/repos.ts';
 import type { Repo } from '../lib/db/types.ts';
 import { getPrEnvironment, listPrEnvironmentsForRepo } from '../lib/db/prEnvironments.ts';
@@ -73,7 +77,7 @@ apiRoutes.use('/api/v1/*', async (c, next) => {
 apiRoutes.get('/api/v1/installations', async (c) => {
   const r = await listActiveInstallations(c.env.DB);
   if (!r.ok) return c.json(apiErr(r.error.code, r.error.message, c.var.requestId), 500);
-  return c.json(apiOk({ installations: r.value }, c.var.requestId));
+  return c.json(apiOk({ installations: r.value.map(publicInstallation) }, c.var.requestId));
 });
 
 apiRoutes.get('/api/v1/installations/:id', async (c) => {
@@ -83,7 +87,7 @@ apiRoutes.get('/api/v1/installations/:id', async (c) => {
   if (!r.value) {
     return c.json(apiErr('E_NOT_FOUND', 'installation not found', c.var.requestId), 404);
   }
-  return c.json(apiOk(r.value, c.var.requestId));
+  return c.json(apiOk(publicInstallation(r.value), c.var.requestId));
 });
 
 apiRoutes.get('/api/v1/installations/:id/repos', async (c) => {

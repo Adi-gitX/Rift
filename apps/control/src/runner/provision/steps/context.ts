@@ -12,6 +12,7 @@ import { CFClient } from '../../../lib/cloudflare/client.ts';
 import type { CustomerWranglerSummary } from '../../../lib/bundle-rewriter/types.ts';
 import { type Logger } from '../../../lib/logger.ts';
 import type { LoadConfigResult, ProvisionResourcesResult } from './types.ts';
+import type { CloudflareCredentials } from '../../../lib/tenant.ts';
 
 export interface StepContext {
   env: Env;
@@ -25,6 +26,8 @@ export interface StepContext {
   fetcher: typeof fetch;
   /** Pre-stored step results keyed by step name (idempotent replay). */
   prior: Record<string, unknown>;
+  /** Cloudflare account + token to provision into (per installation, or the shared demo token). */
+  cf: CloudflareCredentials;
   /** Test-only knob for the upload-script propagation backoff. */
   propagationDelayMs?: number;
   /** When the current step first started (survives retries). Used by await-bundle's deadline. */
@@ -77,8 +80,8 @@ export const PLACEHOLDER_BUNDLE_SOURCE = `export default {
 
 export const cfClientFromCtx = (ctx: StepContext): CFClient =>
   new CFClient({
-    accountId: ctx.env.CF_OWN_ACCOUNT_ID,
-    token: ctx.env.CF_API_TOKEN,
+    accountId: ctx.cf.accountId,
+    token: ctx.cf.token,
     fetcher: ctx.fetcher,
     logger: ctx.log,
     baseDelayMs: 50,

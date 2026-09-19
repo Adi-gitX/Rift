@@ -32,6 +32,8 @@ export interface Env {
   /** Optional Slack-incoming-webhook (or compatible) URL. When set,
    *  the daily cron posts capacity + stuck-runner alerts here. */
   readonly RAFT_ALERT_WEBHOOK?: string;
+  /** Master key for per-installation CF tokens at rest (AES-GCM). Falls back to SESSION_SIGNING_KEY. */
+  readonly RAFT_TOKEN_ENCRYPTION_KEY?: string;
   readonly CF_OWN_ACCOUNT_ID: string;
   /** workers.dev subdomain prefix used to route PR previews on the free tier. */
   readonly CF_WORKERS_SUBDOMAIN: string;

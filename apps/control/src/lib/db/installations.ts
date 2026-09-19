@@ -19,6 +19,47 @@ const fromRow = (r: InstallationRow): Installation => ({
   config: safeJson(r.config_json),
 });
 
+/** API-safe view: hides the encrypted token, exposes connection status. */
+export const publicInstallation = (i: Installation) => ({
+  id: i.id,
+  githubAccount: i.githubAccount,
+  githubAccountId: i.githubAccountId,
+  accountType: i.accountType,
+  plan: i.plan,
+  active: i.active,
+  installedAt: i.installedAt,
+  cloudflareAccountId: i.cloudflareAccountId,
+  cloudflareConnected: Boolean(i.cloudflareAccountId && i.cloudflareTokenSecretId),
+  workersSubdomain:
+    typeof i.config['workersSubdomain'] === 'string' ? i.config['workersSubdomain'] : null,
+});
+
+export const clearCloudflareConnection = (
+  db: D1Database,
+  id: string,
+): Promise<Result<void, CodedError>> =>
+  wrap('clearCloudflareConnection', async () => {
+    await db
+      .prepare(
+        `UPDATE installations SET cloudflare_account_id = NULL, cloudflare_token_secret_id = NULL,
+           config_json = json_remove(config_json, '$.workersSubdomain') WHERE id = ?`,
+      )
+      .bind(id)
+      .run();
+  });
+
+export const setInstallationConfig = (
+  db: D1Database,
+  id: string,
+  patch: Record<string, string>,
+): Promise<Result<void, CodedError>> =>
+  wrap('setInstallationConfig', async () => {
+    await db
+      .prepare(`UPDATE installations SET config_json = json_patch(config_json, ?) WHERE id = ?`)
+      .bind(JSON.stringify(patch), id)
+      .run();
+  });
+
 export interface UpsertInstallationInput {
   id: string;
   githubAccount: string;

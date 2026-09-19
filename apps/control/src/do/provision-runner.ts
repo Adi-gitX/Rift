@@ -33,6 +33,8 @@ import {
   currentStep,
 } from '../runner/provision/state.ts';
 import { AWAIT_BUNDLE_PENDING, STEP_FNS, type StepContext } from '../runner/provision/steps.ts';
+import { resolveCloudflareCredentials } from '../lib/tenant.ts';
+import { emitRunnerEvent } from '../lib/runner-events.ts';
 
 const STATE_KEY = 'state';
 const stepKey = (name: string): string => `step:${name}`;
@@ -144,21 +146,7 @@ export class ProvisionRunner extends DurableObject<Env> {
     step: (typeof STEP_ORDER)[number],
     log: Logger,
   ): Promise<void> {
-    const prior = await this.collectPriorResults();
-    const fetcher = globalThis.fetch.bind(globalThis);
-    const ctx: StepContext = {
-      env: this.env,
-      params: state.params,
-      prEnvId: state.prEnvId,
-      scope: state.scope,
-      scriptName: state.scriptName,
-      previewHostname: state.previewHostname,
-      log,
-      fetcher,
-      prior,
-    };
-    const startedAt = state.stepTimings?.[step]?.startedAt;
-    if (startedAt !== undefined) ctx.stepStartedAt = startedAt;
+    const ctx = await this.buildStepContext(state, step, log);
     // Stamp step start (only on the first attempt — retries reuse the same
     // startedAt so wall-clock duration covers all attempts honestly).
     const timings = state.stepTimings ?? {};
@@ -166,19 +154,65 @@ export class ProvisionRunner extends DurableObject<Env> {
       timings[step] = { ...(timings[step] ?? {}), startedAt: Date.now() };
       await this.ctx.storage.put(STATE_KEY, { ...state, stepTimings: timings });
     }
+    await emitRunnerEvent(this.env, state.prEnvId, {
+      runner: 'provision',
+      step,
+      status: 'started',
+      cursor: state.cursor,
+      attempt: state.attempts + 1,
+    });
     try {
       const result: unknown = await STEP_FNS[step](ctx);
       await this.ctx.storage.put(stepKey(step), result);
-      // Stamp finishedAt and persist.
-      timings[step] = { ...(timings[step] ?? {}), finishedAt: Date.now() };
-      const latest = (await this.ctx.storage.get<ProvisionRunnerState>(STATE_KEY)) ?? state;
-      await this.ctx.storage.put(STATE_KEY, { ...latest, stepTimings: timings });
-      const t = timings[step];
-      log.info('step_ok', { ms: (t?.finishedAt ?? Date.now()) - (t?.startedAt ?? Date.now()) });
-      await this.advance({ ...latest, stepTimings: timings });
+      await this.finishStep(state, step, timings, log);
     } catch (e) {
       await this.handleStepError(state, step, e, log);
     }
+  }
+
+  private async buildStepContext(
+    state: ProvisionRunnerState,
+    step: (typeof STEP_ORDER)[number],
+    log: Logger,
+  ): Promise<StepContext> {
+    const ctx: StepContext = {
+      cf: await resolveCloudflareCredentials(this.env, state.installationId),
+      env: this.env,
+      params: state.params,
+      prEnvId: state.prEnvId,
+      scope: state.scope,
+      scriptName: state.scriptName,
+      previewHostname: state.previewHostname,
+      log,
+      fetcher: globalThis.fetch.bind(globalThis),
+      prior: await this.collectPriorResults(),
+    };
+    const startedAt = state.stepTimings?.[step]?.startedAt;
+    if (startedAt !== undefined) ctx.stepStartedAt = startedAt;
+    return ctx;
+  }
+
+  /** Stamp finishedAt, persist, emit the live event, and advance the cursor. */
+  private async finishStep(
+    state: ProvisionRunnerState,
+    step: (typeof STEP_ORDER)[number],
+    timings: NonNullable<ProvisionRunnerState['stepTimings']>,
+    log: Logger,
+  ): Promise<void> {
+    timings[step] = { ...(timings[step] ?? {}), finishedAt: Date.now() };
+    const latest = (await this.ctx.storage.get<ProvisionRunnerState>(STATE_KEY)) ?? state;
+    await this.ctx.storage.put(STATE_KEY, { ...latest, stepTimings: timings });
+    const t = timings[step];
+    const ms = (t?.finishedAt ?? Date.now()) - (t?.startedAt ?? Date.now());
+    log.info('step_ok', { ms });
+    await emitRunnerEvent(this.env, state.prEnvId, {
+      runner: 'provision',
+      step,
+      status: 'ok',
+      cursor: state.cursor + 1,
+      durationMs: ms,
+    });
+    await this.advance({ ...latest, stepTimings: timings });
   }
 
   private async collectPriorResults(): Promise<Record<string, unknown>> {
@@ -212,6 +246,23 @@ export class ProvisionRunner extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(Date.now());
   }
 
+  private async emitError(
+    state: ProvisionRunnerState,
+    step: (typeof STEP_ORDER)[number],
+    e: unknown,
+    message: string,
+  ): Promise<void> {
+    if (message === AWAIT_BUNDLE_PENDING) return;
+    await emitRunnerEvent(this.env, state.prEnvId, {
+      runner: 'provision',
+      step,
+      status: e instanceof NonRetryableError ? 'failed' : 'retry',
+      cursor: state.cursor,
+      attempt: state.attempts + 1,
+      message,
+    });
+  }
+
   private async handleStepError(
     state: ProvisionRunnerState,
     step: (typeof STEP_ORDER)[number],
@@ -219,6 +270,7 @@ export class ProvisionRunner extends DurableObject<Env> {
     log: Logger,
   ): Promise<void> {
     const message = e instanceof Error ? e.message : String(e);
+    await this.emitError(state, step, e, message);
     if (message === AWAIT_BUNDLE_PENDING) {
       // Still waiting for the customer's GH Action — re-arm without burning an attempt.
       log.info('await_bundle_pending_rearm');
@@ -250,6 +302,12 @@ export class ProvisionRunner extends DurableObject<Env> {
   private async markSucceeded(state: ProvisionRunnerState): Promise<void> {
     const final: ProvisionRunnerState = { ...state, status: 'succeeded', finishedAt: Date.now() };
     await this.ctx.storage.put(STATE_KEY, final);
+    await emitRunnerEvent(this.env, state.prEnvId, {
+      runner: 'provision',
+      step: 'done',
+      status: 'succeeded',
+      cursor: state.cursor,
+    });
     await this.transitionPrEnv(state.prEnvId, state.installationId, 'ready', 'provision-succeeded');
     await appendAudit(this.env.DB, {
       id: ulid(),

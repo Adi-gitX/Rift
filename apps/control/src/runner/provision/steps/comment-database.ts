@@ -18,8 +18,12 @@ const baseLine = (
   }
   const baseLabel = fork.baseDatabaseName ? `\`${fork.baseDatabaseName}\` ` : '';
   const kb = fork.sqlBytes ? ` · ${(fork.sqlBytes / 1024).toFixed(1)} KB dump` : '';
+  const mode =
+    fork.mode === 'schema-only'
+      ? ` · **schema only** (base ${((fork.baseSizeBytes ?? 0) / 1048576).toFixed(0)} MB exceeds the fork cap; rows start empty)`
+      : '';
   const forkLabel = apply?.forkDatabaseId ? ` → fork \`${short(apply.forkDatabaseId)}\`` : '';
-  return `**Database:** forked from base ${baseLabel}\`${short(fork.baseDatabaseId ?? '')}\`${forkLabel}${kb}`;
+  return `**Database:** forked from base ${baseLabel}\`${short(fork.baseDatabaseId ?? '')}\`${forkLabel}${kb}${mode}`;
 };
 
 const migrationsLine = (apply: ApplyMigrationsResult | undefined): string | null => {

@@ -69,6 +69,66 @@ jobs:
             --data-binary @bundle.json --fail-with-body
 `;
 
+/** One GitHub installation + its Cloudflare account connection (multi-tenant). */
+const InstallationRow = ({ inst, onChanged }) => {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ accountId: "", apiToken: "", workersSubdomain: "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    try {
+      const body = { accountId: form.accountId.trim(), apiToken: form.apiToken.trim() };
+      if (form.workersSubdomain.trim()) body.workersSubdomain = form.workersSubdomain.trim();
+      await api.connectCloudflare(inst.id, body);
+      setOpen(false); setForm({ accountId: "", apiToken: "", workersSubdomain: "" });
+      onChanged();
+    } catch (e2) { setErr(String(e2.message || e2)); }
+    setBusy(false);
+  };
+  const disconnect = async () => {
+    if (!window.confirm("Disconnect this Cloudflare account? New PRs fall back to the shared operator token.")) return;
+    setBusy(true);
+    try { await api.disconnectCloudflare(inst.id); onChanged(); } catch (e2) { window.alert(String(e2)); }
+    setBusy(false);
+  };
+  return (
+    <div className="border-b border-white/[0.04] last:border-b-0">
+      <div className="grid grid-cols-[minmax(0,1fr)_110px_minmax(0,1.4fr)_120px] gap-3 items-center px-4 py-3 text-[12.5px]">
+        <span className="text-white/85 truncate">{inst.githubAccount} <span className="text-white/35">· {inst.accountType}</span></span>
+        <span className="d-mono text-white/45">plan {inst.plan}</span>
+        <span className="d-mono text-[11.5px] truncate">
+          {inst.cloudflareConnected
+            ? <><span className="text-[#5BE08F]">● own account</span> <span className="text-white/45">{inst.cloudflareAccountId?.slice(0, 8)}… {inst.workersSubdomain ? `· ${inst.workersSubdomain}` : ""}</span></>
+            : <span className="text-white/45">○ shared operator token</span>}
+        </span>
+        <span className="text-right">
+          {inst.cloudflareConnected
+            ? <button onClick={disconnect} disabled={busy} className="text-[11px] text-white/55 hover:text-[#FF8A75]">Disconnect</button>
+            : <button onClick={() => setOpen((v) => !v)} className="text-[11px] text-[#F6821F] hover:text-[#FBAD41]">{open ? "Cancel" : "Connect Cloudflare →"}</button>}
+        </span>
+      </div>
+      {open && (
+        <form onSubmit={submit} className="px-4 pb-4 grid grid-cols-1 md:grid-cols-[1fr_1.4fr_1fr_auto] gap-2 items-end">
+          <label className="text-[10.5px] uppercase tracking-[0.08em] text-white/45">Account id
+            <input required value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })} placeholder="32-hex account id" className="mt-1 w-full bg-black border border-white/[0.08] rounded px-2.5 py-1.5 text-[12px] d-mono text-white/90 normal-case tracking-normal" />
+          </label>
+          <label className="text-[10.5px] uppercase tracking-[0.08em] text-white/45">API token
+            <input required type="password" value={form.apiToken} onChange={(e) => setForm({ ...form, apiToken: e.target.value })} placeholder="Workers Scripts · D1 · KV · Queues : Edit" className="mt-1 w-full bg-black border border-white/[0.08] rounded px-2.5 py-1.5 text-[12px] d-mono text-white/90 normal-case tracking-normal" />
+          </label>
+          <label className="text-[10.5px] uppercase tracking-[0.08em] text-white/45">workers.dev subdomain
+            <input value={form.workersSubdomain} onChange={(e) => setForm({ ...form, workersSubdomain: e.target.value })} placeholder="acme.workers.dev" className="mt-1 w-full bg-black border border-white/[0.08] rounded px-2.5 py-1.5 text-[12px] d-mono text-white/90 normal-case tracking-normal" />
+          </label>
+          <button type="submit" disabled={busy} className="fc-btn fc-btn-orange h-[34px]">{busy ? "Verifying…" : "Connect"}</button>
+          {err && <div className="md:col-span-4 text-[11.5px] text-[#FF8A75]">{err}</div>}
+          <div className="md:col-span-4 text-[11px] text-white/40">The token is verified against the account, then stored AES-GCM encrypted in D1. Per-PR resources for this installation are created in that account.</div>
+        </form>
+      )}
+    </div>
+  );
+};
+
 const CodeBlock = ({ children, label }) => {
   const [copied, setCopied] = useState(false);
   const onCopy = () => {
@@ -196,11 +256,7 @@ export const RaftSettings = () => {
               </div>
             ) : (
               (me?.installations ?? []).map((i) => (
-                <div key={i.id} className="grid grid-cols-[minmax(0,1fr)_140px_120px] gap-3 px-4 py-3 border-b border-white/[0.04] last:border-b-0 text-[12.5px]">
-                  <span className="text-white/85">{i.githubAccount}</span>
-                  <span className="text-white/55">{i.accountType}</span>
-                  <span className="d-mono text-white/45">plan {i.plan}</span>
-                </div>
+                <InstallationRow key={i.id} inst={i} onChanged={() => api.me().then((m) => setMe(m?.data ?? null)).catch(() => {})} />
               ))
             )}
           </div>

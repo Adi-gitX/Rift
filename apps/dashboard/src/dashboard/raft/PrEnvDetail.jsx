@@ -298,11 +298,38 @@ export const RaftPrEnvDetail = () => {
     }
   };
 
+  const [live, setLive] = useState(false);
   useEffect(() => {
     setLoading(true);
     refresh().finally(() => setLoading(false));
-    pollRef.current = setInterval(refresh, 2000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    // Live channel: runner step events stream from the LogTail DO over a
+    // hibernatable WebSocket; each event triggers a refresh. Polling stays as
+    // a slow fallback (10 s) in case the socket drops.
+    let ws;
+    let debounce;
+    try {
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${window.location.host}/api/v1/prs/${encodeURIComponent(id)}/logs/stream`);
+      ws.onopen = () => setLive(true);
+      ws.onclose = () => setLive(false);
+      ws.onerror = () => setLive(false);
+      ws.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          setLogs((prev) => [...prev.slice(-499), ev]);
+        } catch {}
+        clearTimeout(debounce);
+        debounce = setTimeout(refresh, 250);
+      };
+    } catch {
+      setLive(false);
+    }
+    pollRef.current = setInterval(refresh, live ? 10000 : 2000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      clearTimeout(debounce);
+      try { ws && ws.close(); } catch {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -497,7 +524,7 @@ export const RaftPrEnvDetail = () => {
 
           <section>
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Live logs <span className="text-white/35 normal-case tracking-normal d-mono">poll 2s · LogTail DO ring buffer</span></h2>
+              <h2 className="text-[11.5px] uppercase tracking-[0.08em] text-white/55 font-semibold">Live events <span className="text-white/35 normal-case tracking-normal d-mono">{live ? <span className="text-[#5BE08F]">● websocket live</span> : "poll 2s"} · LogTail DO ring buffer</span></h2>
               {cfWorkerLogs && (
                 <a href={cfWorkerLogs} target="_blank" rel="noreferrer" className="text-[11px] text-[#F6821F] hover:text-[#ff7a5c] inline-flex items-center gap-1 d-mono">
                   Open Workers Logs ↗
@@ -506,9 +533,9 @@ export const RaftPrEnvDetail = () => {
             </div>
             <pre className="text-[11px] leading-5 text-white/85 max-h-64 overflow-auto bg-black border border-white/[0.06] rounded p-3 d-mono">
 {logs.length === 0
-  ? "(no log events yet — bind raft-tail as a tail consumer to stream wrangler tail output here)"
+  ? "(no events yet — runner step events appear here live as the provision / teardown machines run)"
   : logs.map((l) =>
-      `[${new Date((l.ts ?? 0)).toISOString().slice(11, 19)}]  ${l.scriptName ?? ""}  ${l.msg ?? ""}`,
+      `[${new Date((l.ts ?? 0)).toISOString().slice(11, 19)}]  ${l.msg ?? ""}${l.meta?.durationMs !== undefined ? `  ${l.meta.durationMs}ms` : ""}${l.meta?.message ? `  ${l.meta.message}` : ""}`,
     ).join("\n")}
             </pre>
           </section>

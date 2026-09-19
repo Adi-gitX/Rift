@@ -22,6 +22,8 @@ import {
   currentTeardownStep,
 } from '../runner/teardown/state.ts';
 import { TEARDOWN_STEP_FNS, type TeardownStepContext } from '../runner/teardown/steps.ts';
+import { resolveCloudflareCredentials } from '../lib/tenant.ts';
+import { emitRunnerEvent } from '../lib/runner-events.ts';
 
 const STATE_KEY = 'state';
 const stepKey = (name: string): string => `step:${name}`;
@@ -84,6 +86,7 @@ export class TeardownRunner extends DurableObject<Env> {
       prEnvId: state.prEnvId,
       installationId: state.installationId,
       log,
+      cf: await resolveCloudflareCredentials(this.env, state.installationId),
     };
     try {
       if (step === 'mark-tearing-down') {
@@ -92,6 +95,12 @@ export class TeardownRunner extends DurableObject<Env> {
       const result: unknown = await TEARDOWN_STEP_FNS[step](ctx);
       await this.ctx.storage.put(stepKey(step), result);
       log.info('teardown_step_ok');
+      await emitRunnerEvent(this.env, state.prEnvId, {
+        runner: 'teardown',
+        step,
+        status: 'ok',
+        cursor: state.cursor + 1,
+      });
       await this.advance(state);
     } catch (e) {
       await this.handleStepError(state, step, e, log);

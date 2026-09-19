@@ -63,6 +63,9 @@ export interface ProvisionResourcesResult {
 
 export interface ForkBaseDbResult {
   source: 'skipped' | 'forked';
+  /** 'schema-only' when the base exceeded the size cap (dump_options.no_data). */
+  mode?: 'full' | 'schema-only';
+  baseSizeBytes?: number;
   /** When source==='forked', the source DB id we read from. */
   baseDatabaseId?: string;
   baseDatabaseName?: string;

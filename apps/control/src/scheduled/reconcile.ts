@@ -21,6 +21,12 @@ import { readListBody } from '../lib/cloudflare/list.ts';
 import { appendAudit } from '../lib/db/auditLog.ts';
 import { ulid } from '../lib/ids.ts';
 import { Logger } from '../lib/logger.ts';
+import { listActiveInstallations } from '../lib/db/installations.ts';
+import {
+  resolveCloudflareCredentials,
+  sharedCredentials,
+  type CloudflareCredentials,
+} from '../lib/tenant.ts';
 
 export type OrphanKind = 'worker' | 'd1' | 'kv' | 'queue';
 
@@ -151,35 +157,57 @@ export interface ReconcileResult {
   failed: { orphan: Orphan; error: string }[];
 }
 
+/** Shared account + every connected tenant account, de-duplicated by account id. */
+const credentialSets = async (env: Env): Promise<CloudflareCredentials[]> => {
+  const out = [sharedCredentials(env)];
+  const installs = await listActiveInstallations(env.DB);
+  for (const i of installs.ok ? installs.value : []) {
+    if (!i.cloudflareAccountId) continue;
+    const creds = await resolveCloudflareCredentials(env, i.id);
+    if (creds.source === 'installation' && !out.some((c) => c.accountId === creds.accountId)) {
+      out.push(creds);
+    }
+  }
+  return out;
+};
+
 export const reconcileOrphans = async (
   env: Env,
   opts: { dryRun: boolean; force?: boolean; actor?: string },
 ): Promise<ReconcileResult> => {
   const log = new Logger({ component: 'reconcile' });
-  const client = new CFClient({
-    accountId: env.CF_OWN_ACCOUNT_ID,
-    token: env.CF_API_TOKEN,
-    fetcher: globalThis.fetch.bind(globalThis),
-    logger: log,
-    baseDelayMs: 100,
-  });
-  const [res, rows] = await Promise.all([listAccountResources(client, log), readEnvRows(env.DB)]);
-  const orphans = findOrphans(res, rows, { force: opts.force ?? false });
   const result: ReconcileResult = {
     dryRun: opts.dryRun,
-    scanned: {
-      scripts: res.scripts.length,
-      d1: res.d1.length,
-      kv: res.kv.length,
-      queues: res.queues.length,
-    },
-    orphans,
+    scanned: { scripts: 0, d1: 0, kv: 0, queues: 0 },
+    orphans: [],
     deleted: [],
     failed: [],
   };
-  log.info('reconcile_scan', { ...result.scanned, orphans: orphans.length, dry_run: opts.dryRun });
-  if (opts.dryRun) return result;
-  await deleteAndAudit(env, client, result, opts.actor ?? 'reconciler');
+  const rows = await readEnvRows(env.DB);
+  for (const creds of await credentialSets(env)) {
+    const client = new CFClient({
+      accountId: creds.accountId,
+      token: creds.token,
+      fetcher: globalThis.fetch.bind(globalThis),
+      logger: log,
+      baseDelayMs: 100,
+    });
+    const res = await listAccountResources(client, log);
+    const orphans = findOrphans(res, rows, { force: opts.force ?? false });
+    result.scanned.scripts += res.scripts.length;
+    result.scanned.d1 += res.d1.length;
+    result.scanned.kv += res.kv.length;
+    result.scanned.queues += res.queues.length;
+    result.orphans.push(...orphans);
+    log.info('reconcile_scan', {
+      account: creds.accountId,
+      orphans: orphans.length,
+      dry_run: opts.dryRun,
+    });
+    if (!opts.dryRun) {
+      await deleteAndAudit(env, client, { ...result, orphans }, opts.actor ?? 'reconciler');
+    }
+  }
   return result;
 };
 

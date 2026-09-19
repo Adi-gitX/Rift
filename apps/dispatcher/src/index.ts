@@ -66,10 +66,14 @@ const handler: ExportedHandler<DispatcherEnv> = {
     }
     const scope = segments[0];
     if (!scope) return new Response('Bad request', { status: 400 });
-    const scriptName = await env.ROUTES.get(`route:${scope}`);
+    const route = await env.ROUTES.getWithMetadata<{ host?: string }>(`route:${scope}`);
+    const scriptName = route.value;
     if (!scriptName) {
       return new Response(`No preview for ${scope}`, { status: 404 });
     }
+    // Tenants that connected their own Cloudflare account live on their own
+    // workers.dev subdomain; the control plane records it in route metadata.
+    const host = route.metadata?.host ?? `${scriptName}.${env.CF_WORKERS_SUBDOMAIN}`;
     const rest = segments.slice(1).join('/');
     // Append the per-scope auth token + a Set-Cookie on the redirect, so
     // subsequent navigation under the user worker keeps the cookie (browser
@@ -78,7 +82,7 @@ const handler: ExportedHandler<DispatcherEnv> = {
     const token = await signScope(scope, env.INTERNAL_DISPATCH_SECRET);
     const sep = url.search ? '&' : rest.includes('?') ? '&' : '?';
     const search = url.search ? `${url.search}${sep}raft_t=${token}` : `?raft_t=${token}`;
-    const target = `https://${scriptName}.${env.CF_WORKERS_SUBDOMAIN}/${rest}${search}`;
+    const target = `https://${host}/${rest}${search}`;
     const headers = new Headers({ location: target });
     headers.append('set-cookie', `raft_t=${token}; Path=/; Max-Age=86400; SameSite=Lax; Secure`);
     return new Response(null, { status: 302, headers });

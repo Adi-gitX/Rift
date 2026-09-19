@@ -65,6 +65,12 @@ const seedAndContext = async (suffix: string): Promise<StepContext> => {
     previewHostname: 'http://example/preview',
     log: new Logger({ component: 'test' }),
     fetcher: globalThis.fetch.bind(globalThis),
+    cf: {
+      accountId: env.CF_OWN_ACCOUNT_ID,
+      token: env.CF_API_TOKEN,
+      workersSubdomain: env.CF_WORKERS_SUBDOMAIN,
+      source: 'shared',
+    },
     propagationDelayMs: 0,
     prior: {
       'load-config': {
