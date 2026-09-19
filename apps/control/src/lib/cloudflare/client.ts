@@ -105,7 +105,28 @@ export class CFClient {
     return this.executeWithRetry(url, init, schema, options);
   }
 
-  /** Raw request without envelope parsing — used for D1 import upload, etc. */
+  /**
+   * Unauthenticated request through the injected fetcher — for presigned URLs
+   * (D1 import upload to R2). Adding our Bearer header to a presigned URL
+   * makes S3-style signing reject the request with 400.
+   */
+  async fetchUnsigned(url: string, init: RequestInit): Promise<Result<Response, CodedError>> {
+    try {
+      const res = await this.opts.fetcher(url, init);
+      if (res.ok) return ok(res);
+      const body = await safeText(res);
+      return err(
+        new CodedError('E_CF_API', `cf_status_${res.status}`, {
+          status: 502,
+          details: { upstreamStatus: res.status, body: body.slice(0, 1024) },
+        }),
+      );
+    } catch (cause) {
+      return err(new CodedError('E_CF_API', 'cf_network', { cause }));
+    }
+  }
+
+  /** Raw request without envelope parsing — used for account-scoped list endpoints. */
   async raw(options: CFRequestOptions): Promise<Result<Response, CodedError>> {
     const url = this.buildUrl(options.path, options.unscoped ?? false);
     const init = this.buildInit(options);

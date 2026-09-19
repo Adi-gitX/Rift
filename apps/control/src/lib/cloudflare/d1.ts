@@ -108,12 +108,10 @@ export const uploadImportSql = async (
   uploadUrl: string,
   sql: string | Uint8Array,
 ): Promise<Result<{ uploaded: true }, CodedError>> => {
-  const r = await client.raw({
+  const r = await client.fetchUnsigned(uploadUrl, {
     method: 'PUT',
-    path: uploadUrl,
-    body: sql,
+    body: sql as BodyInit,
     headers: { 'content-type': 'application/sql' },
-    unscoped: true,
   });
   return r.ok ? ok({ uploaded: true as const }) : err(r.error);
 };
