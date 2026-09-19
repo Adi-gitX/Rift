@@ -19,6 +19,7 @@ Every `REPLACE_ME` in the project, with where to source it. Updated for v0.2.0.
 | `RAFT_BASE_DOMAIN` | wrangler.vars | required | Hostname construction |
 | `RAFT_ENV` | wrangler.vars | required | Logging / alerting tag |
 | `RAFT_ALERT_WEBHOOK` | wrangler.secret | optional | Slack-incoming-webhook URL for cap-near + stuck-runner alerts |
+| `RAFT_TOKEN_ENCRYPTION_KEY` | wrangler.secret | optional | Master key for per-installation Cloudflare tokens at rest (AES-GCM). Defaults to `SESSION_SIGNING_KEY`; set a dedicated 32-byte key in production. |
 | `RAFT_DEMO_BASE_D1_ID` | wrangler.vars | optional | D1 source to fork into every per-PR DB when `repo.baseD1Id` is null. Without this, the `fork-base-db` step no-ops and PRs get an empty D1. |
 
 > **PKCS#8 note**: GitHub gives you a PKCS#1 PEM (`-----BEGIN RSA PRIVATE KEY-----`). Web Crypto on Workers needs PKCS#8. Convert before uploading:

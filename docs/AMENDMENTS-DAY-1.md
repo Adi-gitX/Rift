@@ -365,3 +365,19 @@ was already terminal). Closes the `TODO(raft:slice-E)`.
 - `steps.ts` split into `steps/*.ts` so the 300-line / 40-line ESLint caps
   hold; lint, prettier, typecheck and tests are all green in CI.
 - D1 reserve in the quota guard raised to 2 (raft-meta + customer base DB).
+
+## D15 — Multi-tenant credentials, size-aware fork, live events
+- `installations.cloudflare_token_secret_id` now holds the tenant's API token
+  AES-GCM-encrypted (`lib/crypto/aes.ts`, key = SHA-256 of
+  `RAFT_TOKEN_ENCRYPTION_KEY ?? SESSION_SIGNING_KEY`). `lib/tenant.ts`
+  resolves `{accountId, token, workersSubdomain}` per installation with the
+  shared token as fallback; provision, teardown and reconcile all go through
+  it. `POST/DELETE /api/v1/installations/:id/cloudflare` verifies the token
+  against the account before storing. ROUTES metadata carries the tenant host
+  so the dispatcher redirects into the right `workers.dev` subdomain.
+- `fork-base-db` reads `GET /d1/database/{id}.file_size`; above
+  `max_d1_export_size_mb` (default 100) it exports with
+  `dump_options.no_data` and reports `mode: 'schema-only'`.
+- Runners emit `started/ok/retry/failed/succeeded` events into the LogTail
+  DO; the PR page subscribes over `/api/v1/prs/:id/logs/stream` and refreshes
+  on each event (poll every 10 s as fallback).

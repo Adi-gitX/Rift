@@ -44,7 +44,7 @@ Both end-to-end verified against real Cloudflare resources (see §3 Impact / Met
 | **Queues** | `raft-events` (decouple webhook receipt from provisioning) + `raft-tail-events` (Tail fan-out) |
 | **Durable Objects** | 5 classes — `RepoCoordinator`, `PrEnvironment`, `ProvisionRunner`, `TeardownRunner`, `LogTail` |
 | **DO Alarms** | Replaces paid Cloudflare Workflows — alarm-driven step machines with backoff |
-| **Hibernatable WebSockets** | `LogTail` DO WS endpoint for live fan-out; the SPA polls runner state every 2 s today |
+| **Hibernatable WebSockets** | Runner step events fan out from the `LogTail` DO to open dashboard tabs; polling is only the fallback |
 | **Cron Triggers** | Daily 04:00 UTC sweep of idle PR environments |
 | **Workers Tail** | `raft-tail` Worker deployed; attaching it to per-PR scripts needs Workers Paid (CF 100150), so it is not yet fed on the free tier |
 | **Workers Logs** | Native log viewer (Logpush is paid; this is the free substitute) |
@@ -103,6 +103,7 @@ The PRD calls for two paid products. Raft substitutes both behind thin abstracti
 | Cloudflare Workflows | DO Alarms with explicit step cursor + per-step cached results + per-step timings | Equivalent semantics; bonus: full state + timings introspectable from the dashboard |
 | Logpush | `raft-tail` Worker + per-PR Workers Logs deep-link from dashboard | Lose 30-day R2 retention; gain $0 cost |
 | Cloudflare Access | Signed-cookie auth (HMAC-SHA256) for the operator dashboard; per-scope HMAC token gates static-synth previews | One-operator demo auth + per-PR token |
+| Secrets Store | Per-installation Cloudflare tokens AES-GCM-encrypted in D1 (`RAFT_TOKEN_ENCRYPTION_KEY`) | Same call sites; swap the storage when on paid |
 
 ### Provisioning machine — 9 idempotent steps
 

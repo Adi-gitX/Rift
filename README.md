@@ -49,6 +49,10 @@ Workers Builds gives every branch a preview URL, but that preview runs the PR's 
 
 On `synchronize` the fork is kept (one-shot per PR), migrations re-run for new files only, and the comment is edited in place. Closing the PR deletes the fork with everything else.
 
+**Large databases.** Export/import is a full logical copy, so above a cap (100 MB by default, `max_d1_export_size_mb` in the repo config) Raft forks **schema only** (`dump_options.no_data`) and says so in the comment; migration preview and schema diff still work, row deltas start at zero.
+
+**Multi-tenant.** Each GitHub installation can connect its own Cloudflare account from Settings. The token is verified (list Workers + D1), stored AES-GCM encrypted in D1, and used by the provision, teardown and reconcile paths for that installation; the dispatcher redirects into the tenant's own `workers.dev` subdomain. Installations that never connect fall back to the operator's shared token.
+
 ```
 **Database:** forked from base `raft-demo-source` `969a17b6…` → fork `1f3c9a2b…` · 2.0 KB dump
 **Migrations:** 1 migration applied (`0002_add_posts.sql` 412 ms) · 1 already applied on base
@@ -166,7 +170,7 @@ flowchart LR
 | KV                       | Session cache (`CACHE`), dispatcher routes (`ROUTES`), bundle blobs (`BUNDLES_KV`) |
 | Queues                   | Decouple webhook ingress from provisioning                                         |
 | Cron Triggers            | Daily idle-environment sweep                                                       |
-| Hibernatable WebSockets  | `LogTail` DO exposes a WS stream; the SPA currently polls runner state every 2 s     |
+| Hibernatable WebSockets  | Runner step events stream from the `LogTail` DO to open PR pages (poll is the fallback) |
 | Workers Logs             | Operator log access via per-PR deep-links                                          |
 
 ### Why this can only exist on Cloudflare
