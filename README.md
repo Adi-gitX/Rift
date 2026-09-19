@@ -386,6 +386,7 @@ The PRD targets two paid Cloudflare products; Raft substitutes both with thin ab
 | CF resources after teardown             | D1 / KV / Queue / Worker → all `404`                                       |
 | Webhook dedup on replayed `delivery_id` | `200` + `dedup:true` (no double-provision)                                 |
 | Sticky PR comment                       | Edited in place via embedded HTML marker — never duplicated                |
+| D1 branching (real PR)                  | Fork inherits base rows; only pending migration runs; base unchanged; schema diff in comment (raft-demo-target#11) |
 | Tests                                   | 146 / 146 across 34 files (vitest-pool-workers; in-memory fake D1 + GitHub) |
 | TypeScript                              | `strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes`, no `any` |
 | File / function caps                    | <300 / <40 lines (ESLint-enforced)                                         |

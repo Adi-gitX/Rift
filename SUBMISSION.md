@@ -171,7 +171,19 @@ Verified at the data layer: D1 UUIDs in our metadata DB are cross-referenced aga
 
 Sticky PR comment on every provision: includes preview URL, bundle source (customer Worker / static site / configuration-needed), live probe (HTTP status · response time · bytes), and a dashboard deep-link. Edited in place via embedded HTML marker on synchronize / redeploy — never duplicated.
 
-> **Screenshot:** `demo/screenshots/sticky-pr-comment.png` *(TODO: capture before submission)*
+**Live evidence — D1 branching + migration preview** (PR [Adi-gitX/raft-demo-target#11](https://github.com/Adi-gitX/raft-demo-target/pull/11), 2026-09-18). The PR adds `migrations/0002_add_posts.sql`. Raft forked the production D1 (`raft-demo-source`, 3 users), ran only the pending migration on the fork, and posted:
+
+```
+**Database:** forked from base `raft-demo-source` `969a17b6…` → fork `e6cb5ea0…` · 0.7 KB dump
+**Migrations:** 1 migration applied (`0002_add_posts.sql` 290 ms) · 1 already applied on base
+| Schema change | Detail |
+| + table  | `posts` |
+| + column | `users.bio` TEXT |
+| + index  | `idx_posts_user` |
+| rows     | posts 0 → 3 |
+```
+
+Cross-checked with the D1 REST API: the fork has `users` (3 rows, inherited) + `posts` (3 rows, seeded by the migration) and `d1_migrations` = `[0001_init.sql, 0002_add_posts.sql]`; the base still has no `posts` table and only `0001_init.sql` recorded. Closing the PR deleted the fork (confirmed via `GET /d1/database`); reopening created a fresh one. PR-reopened → `ready` in ~45 s including the GitHub Action build + upload; PR-closed → `torn_down` in ~10 s.
 
 ### Lifecycle latency
 
