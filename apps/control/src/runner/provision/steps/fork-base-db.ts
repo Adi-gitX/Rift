@@ -14,7 +14,8 @@
  */
 import * as cfD1 from '../../../lib/cloudflare/d1.ts';
 import { getRepo, repoIdOf } from '../../../lib/db/repos.ts';
-import { cfClientFromCtx, requirePrior, sha256Hex, type StepContext } from './context.ts';
+import { md5Hex } from '../../../lib/crypto/md5.ts';
+import { cfClientFromCtx, requirePrior, type StepContext } from './context.ts';
 import type { ForkBaseDbResult } from './types.ts';
 
 const resolveBase = async (ctx: StepContext): Promise<{ id: string | null; name?: string }> => {
@@ -73,7 +74,8 @@ const copyDatabase = async (
   const client = cfClientFromCtx(ctx);
   const sql = await cfD1.exportSqlAndWait(client, from);
   if (!sql.ok) return { ok: false, reason: `export_failed: ${sql.error.message}` };
-  const etag = await sha256Hex(sql.value);
+  // D1 import validates the etag as the MD5 of the uploaded file.
+  const etag = md5Hex(sql.value);
   const importR = await cfD1.importSqlAndWait(client, to, sql.value, etag);
   if (!importR.ok) return { ok: false, reason: `import_failed: ${importR.error.message}` };
   return { ok: true, sqlBytes: sql.value.length };

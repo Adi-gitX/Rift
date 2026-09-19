@@ -163,6 +163,9 @@ export const importSqlAndWait = async (
   if (!upload.ok) return err(upload.error);
   const ingest = await ingestImport(client, databaseId, etag, init.value.filename);
   if (!ingest.ok) return err(ingest.error);
+  if (ingest.value.success === false || ingest.value.error) {
+    return err(new Coded('E_CF_API', `d1_import_error: ${ingest.value.error ?? 'unknown'}`));
+  }
   if (ingest.value.status === 'complete') return ok({ status: 'complete' as const });
   return waitForImport(client, databaseId, ingest.value.at_bookmark ?? '');
 };
@@ -220,7 +223,7 @@ const waitForImport = async (
     const r = await pollImport(client, databaseId, bookmark);
     if (!r.ok) return err(r.error);
     if (r.value.status === 'complete') return ok({ status: 'complete' as const });
-    if (r.value.status === 'error') {
+    if (r.value.status === 'error' || r.value.success === false || r.value.error) {
       return err(new Coded('E_CF_API', `d1_import_error: ${r.value.error ?? 'unknown'}`));
     }
     await new Promise((x) => setTimeout(x, POLL_INTERVAL_MS));

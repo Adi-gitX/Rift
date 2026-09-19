@@ -45,9 +45,11 @@ export const d1ImportInitSchema = z.object({
 export type D1ImportInitShape = z.infer<typeof d1ImportInitSchema>;
 
 export const d1ImportPollSchema = z.object({
-  status: z.enum(['active', 'complete', 'error']),
-  at_bookmark: z.string().optional(),
+  // CF answers {success:false, error} (no status) when the upload is missing/invalid.
+  success: z.boolean().optional(),
   error: z.string().optional(),
+  status: z.enum(['active', 'complete', 'error']).optional(),
+  at_bookmark: z.string().optional(),
 });
 export type D1ImportPollShape = z.infer<typeof d1ImportPollSchema>;
 
